@@ -42,7 +42,7 @@ int has_been_acked(cmu_socket_t *sock, uint32_t seq) {
   int result;
   while (pthread_mutex_lock(&(sock->window.ack_lock)) != 0) {
   }
-  result = !before(sock->window.last_ack_received, seq);
+  result = after(sock->window.last_ack_received, seq);
   pthread_mutex_unlock(&(sock->window.ack_lock));
   return result;
 }
