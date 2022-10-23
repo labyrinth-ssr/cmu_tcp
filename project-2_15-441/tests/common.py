@@ -29,10 +29,10 @@ IFNAME = os.getenv("IFNAME")
 # client VM and vice versa.
 HOSTNAME = subprocess.check_output("hostname").strip()
 if HOSTNAME.decode("utf-8") == "client":
-    TESTING_HOSTNAME = "client"
+    TESTING_HOSTNAME = "server"
     HOSTNAME = "client"
 elif HOSTNAME.decode("utf-8") == "server":
-    TESTING_HOSTNAME = "server"
+    TESTING_HOSTNAME = "client"
     HOSTNAME = "server"
 else:
     raise RuntimeError(

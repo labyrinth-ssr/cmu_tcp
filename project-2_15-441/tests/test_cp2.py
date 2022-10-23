@@ -8,7 +8,7 @@
 # permission of the 15-441/641 course staff.
 
 from fabric import Connection
-from scapy.all import srp1, Raw
+from scapy.all import sr1, Raw
 
 from common import (
     CMUTCP,
@@ -19,7 +19,6 @@ from common import (
     START_TESTING_SERVER_CMD,
     STOP_TESTING_SERVER_CMD,
     TESTING_HOST_IP,
-    eth,
     ip,
     udp,
 )
@@ -27,10 +26,10 @@ from common import (
 payloads = ["pa", "pytest 1234567"]
 
 
-def test_sequence_number():
+def test_basic_ack_packets():
     print("Running test_basic_ack_packets()")
-    """Basic test: Check if when you data packets,
-    the server responds with correct ack packet with correct ack num.
+    """Basic test: Check if when you send data packets, the server responds
+    with correct ack packet with a correct ack number.
     """
     print("Running test_sequence_number()")
     for payload in payloads:
@@ -44,12 +43,11 @@ def test_sequence_number():
                 conn.run(START_TESTING_SERVER_CMD)
                 conn.run("tmux has-session -t pytest_server")
                 syn_pkt = (
-                    eth
-                    / ip
-                    / udp
-                    / CMUTCP(plen=25, seq_num=1000, flags=SYN_MASK)
+                    ip /
+                    udp /
+                    CMUTCP(plen=25, seq_num=1000, flags=SYN_MASK)
                 )
-                syn_ack_pkt = srp1(syn_pkt, timeout=TIMEOUT, iface=IFNAME)
+                syn_ack_pkt = sr1(syn_pkt, timeout=TIMEOUT, iface=IFNAME)
 
                 if (
                     syn_ack_pkt is None
@@ -67,17 +65,16 @@ def test_sequence_number():
                 print(syn_ack_pkt[CMUTCP].seq_num)
 
                 ack_pkt = (
-                    eth
-                    / ip
-                    / udp
-                    / CMUTCP(
+                    ip /
+                    udp /
+                    CMUTCP(
                         plen=25,
                         seq_num=1001,
                         ack_num=syn_ack_pkt[CMUTCP].seq_num + 1,
                         flags=ACK_MASK,
                     )
                 )
-                empty_pkt = srp1(ack_pkt, timeout=0.5, iface=IFNAME)
+                empty_pkt = sr1(ack_pkt, timeout=0.5, iface=IFNAME)
 
                 if empty_pkt is not None:
                     print("Listener (server) should not respond to ack pkt.")
@@ -86,10 +83,9 @@ def test_sequence_number():
                     return
 
                 data_pkt = (
-                    eth
-                    / ip
-                    / udp
-                    / CMUTCP(
+                    ip /
+                    udp /
+                    CMUTCP(
                         plen=25 + len(payload),
                         seq_num=1001,
                         ack_num=syn_ack_pkt[CMUTCP].seq_num + 1,
@@ -98,7 +94,7 @@ def test_sequence_number():
                     / Raw(load=payload)
                 )
 
-                server_ack_pkt = srp1(data_pkt, timeout=TIMEOUT, iface=IFNAME)
+                server_ack_pkt = sr1(data_pkt, timeout=TIMEOUT, iface=IFNAME)
 
                 if (
                     server_ack_pkt is None
@@ -123,4 +119,4 @@ def test_sequence_number():
 
 
 if __name__ == "__main__":
-    test_sequence_number()
+    test_basic_ack_packets()
