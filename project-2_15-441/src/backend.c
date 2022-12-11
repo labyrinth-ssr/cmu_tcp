@@ -48,6 +48,7 @@ int has_been_acked(cmu_socket_t *sock, uint32_t seq) {
   printf("    out_func: has_been_acked\n");
   return result;
 }
+void handshake_send(cmu_socket_t *sock, uint8_t *data, int buf_len, int flag);
 
 /**
  * 
@@ -74,6 +75,15 @@ void handle_message(cmu_socket_t *sock, uint8_t *pkt) {
       }
       break;
     }
+    case SYN_FLAG_MASK:{
+      if(get_hlen(hdr) != get_plen(hdr)) break;
+      sock->window.next_seq_expected = get_seq(hdr) + 1;
+      pthread_mutex_unlock(&(sock->recv_lock));
+      handshake_send(sock, NULL, 0, (SYN_FLAG_MASK | ACK_FLAG_MASK));
+      while (pthread_mutex_lock(&(sock->recv_lock)) != 0) {
+      }
+      break;
+    }
     default: {
       socklen_t conn_len = sizeof(sock->conn);
       uint32_t seq = sock->window.last_ack_received;
@@ -88,7 +98,6 @@ void handle_message(cmu_socket_t *sock, uint8_t *pkt) {
 
       uint16_t src = sock->my_port;
       uint16_t dst = ntohs(sock->conn.sin_port);
-      //! what we want next.
       uint32_t ack = get_seq(hdr) + get_payload_len(pkt);
       uint16_t hlen = sizeof(cmu_tcp_header_t);
       uint16_t plen = hlen + payload_len;
@@ -242,6 +251,126 @@ void single_send(cmu_socket_t *sock, uint8_t *data, int buf_len) {
 }
 
 
+bool handle_handshake(cmu_socket_t*sock, uint8_t *data, int buf_len, uint8_t* pkt){
+  cmu_tcp_header_t* hdr = (cmu_tcp_header_t*)pkt;
+  read_header(hdr);
+  int flag = get_flags(hdr);
+  int this_flag = true;
+  if(pkt == NULL){
+    return false;
+  }
+  switch (flag)
+  {
+    case (SYN_FLAG_MASK|ACK_FLAG_MASK):{
+      if(get_hlen(hdr) != get_plen(hdr)) {this_flag = false; break;}
+      if(get_ack(hdr) != sock->window.last_ack_received + 1) {this_flag = false; break;}
+      sock->window.last_ack_received = get_ack(hdr);
+      sock->window.next_seq_expected = get_seq(hdr) + 1;
+      pthread_mutex_unlock(&(sock->recv_lock));
+      handshake_send(sock, data, buf_len, ACK_FLAG_MASK);
+      while (pthread_mutex_lock(&(sock->recv_lock)) != 0) {
+      }
+      break;
+    }
+    case ACK_FLAG_MASK:{
+      printf("asssssaasa\n");
+      if(get_ack(hdr) != sock->window.last_ack_received + 1) {this_flag = false; break;}
+      set_flags(hdr, 0);
+      sock->window.last_ack_received = get_ack(hdr);
+      handle_message(sock, pkt);
+      break;
+    }
+    default:
+      this_flag = false;
+      break;
+  }
+  free(pkt);
+  pthread_mutex_unlock(&(sock->recv_lock)); 
+  return flag;
+}
+
+
+/**
+ * 如果返回值不为空，则需要做两件事情：
+ * 1. 使用后释放pkt
+ * 2. 释放receive锁
+*/
+uint8_t* wait_check(cmu_socket_t* sock){
+  cmu_tcp_header_t hdr;
+  uint8_t *pkt;
+  socklen_t conn_len = sizeof(sock->conn);
+  ssize_t len = 0;
+  uint32_t plen = 0, buf_size = 0, n = 0;
+  while (pthread_mutex_lock(&(sock->recv_lock)) != 0) {
+  }
+  struct pollfd ack_fd;
+  ack_fd.fd = sock->socket;
+  ack_fd.events = POLLIN;
+  if (poll(&ack_fd, 1, 3000) <= 0) {
+    pthread_mutex_unlock(&(sock->recv_lock));
+    return NULL;
+  }
+  len = recvfrom(sock->socket, &hdr, sizeof(cmu_tcp_header_t),
+                  MSG_DONTWAIT | MSG_PEEK, (struct sockaddr *)&(sock->conn),
+                  &conn_len);
+
+  if (len >= (ssize_t)sizeof(cmu_tcp_header_t)) {
+    plen = get_plen(&hdr);
+    pkt = malloc(plen);
+    while (buf_size < plen) {
+      n = recvfrom(sock->socket, pkt + buf_size, plen - buf_size, 0,
+                   (struct sockaddr *)&(sock->conn), &conn_len);
+      buf_size = buf_size + n;
+    }
+    return pkt;
+  }
+  pthread_mutex_unlock(&(sock->recv_lock));
+  return NULL;
+}
+
+
+void handshake_send(cmu_socket_t *sock, uint8_t *data, int b_len, int flag){
+  printf("sssssssssssssssssssssssss\n");
+ 
+  uint8_t *msg;
+  uint8_t *data_offset = NULL;
+  int buf_len = 0;
+  if(flag == ACK_FLAG_MASK){
+    data_offset = data;
+    buf_len = b_len;
+  }
+  size_t conn_len = sizeof(sock->conn);
+  int sockfd = sock->socket;
+
+  uint16_t src = sock->my_port;
+  uint16_t dst = ntohs(sock->conn.sin_port);
+  uint32_t seq = sock->window.last_ack_received;
+  uint32_t ack = sock->window.next_seq_expected;
+  uint16_t hlen = sizeof(cmu_tcp_header_t);
+  uint16_t adv_window = 1;
+  uint16_t ext_len = 0;
+  uint8_t *ext_data = NULL;
+  uint16_t payload_len = MIN((uint16_t)buf_len, (uint16_t)MSS);
+  uint8_t *payload = data_offset;
+  uint16_t plen = hlen + payload_len;
+  uint8_t flags = flag;
+
+  msg = create_packet(src, dst, seq, ack, hlen, plen, flags, adv_window, ext_len, ext_data, payload, payload_len);
+  while (1) {
+    send_header((cmu_tcp_header_t*)msg);
+    sendto(sockfd, msg, plen, 0, (struct sockaddr *)&(sock->conn), conn_len);
+    printf("ssssaaaaaaaaaaaaaaaaaaaaaaa\n");
+    if (handle_handshake(sock, data, b_len, wait_check(sock))) {
+      printf("ssssaaaaaaaaaaaaaaaaaaaaaaa\n");
+      break;
+    }
+    printf("ssssaaaaaaaaaaaaaaaaaaaaaaa\n");
+
+  }
+  if(data_offset != NULL) single_send(sock, data_offset + payload_len, buf_len + payload_len);     
+}
+
+
 void client_first_handshake(cmu_socket_t* sock){
   printf("    in_func: client_first_handshake\n");
   uint8_t *msg;
@@ -281,7 +410,6 @@ bool handle_first_handshake(cmu_socket_t *sock){
   ack_fd.events = POLLIN;
   if (poll(&ack_fd, 1, 3000) <= 0) {
     pthread_mutex_unlock(&(sock->recv_lock));
-    printf("ssssssssssssssssssssssssssss\n");
     return false;
   }
   len = recvfrom(sock->socket, &hdr, sizeof(cmu_tcp_header_t),
@@ -493,26 +621,42 @@ void *begin_backend(void *in) {
   printf("    in_func: begin_background\n");
   cmu_socket_t *sock = (cmu_socket_t *)in;
   int death, buf_len, send_signal;
-  uint8_t *data;
+  uint8_t *data = NULL;
+
+  // while(sock->type == TCP_INITIATOR){
+  //   client_first_handshake(sock);
+  //   if (!handle_second_handshake(sock)) {
+  //     continue;
+  //   }
+  //   client_third_handshake(sock);
+  //   // check_for_data(sock, TIMEOUT);
+  //   break;
+  // }
+
+  // while(sock->type == TCP_LISTENER){
+  //   printf("a\n");
+  //   if(!handle_first_handshake(sock)){
+  //     continue;
+  //   }
+  //   handle_third_handshake(sock);
+  //   // exit(0);
+  //   break;
+  // }
 
   while(sock->type == TCP_INITIATOR){
-    client_first_handshake(sock);
-    if (!handle_second_handshake(sock)) {
-      continue;
+    while (pthread_mutex_lock(&(sock->send_lock)) != 0) {
     }
-    client_third_handshake(sock);
-    // check_for_data(sock, TIMEOUT);
-    break;
-  }
-
-  while(sock->type == TCP_LISTENER){
-    printf("a\n");
-    if(!handle_first_handshake(sock)){
-      continue;
+    buf_len = sock->sending_len;
+    if(buf_len != 0){ 
+      data = malloc(buf_len);
+      memcpy(data, sock->sending_buf, buf_len);
+      sock->sending_len = 0;
+      free(sock->sending_buf);
+      sock->sending_buf = NULL;
     }
-    handle_third_handshake(sock);
-    // exit(0);
-    break;
+    pthread_mutex_unlock(&(sock->send_lock));
+    handshake_send(sock, data, buf_len, SYN_FLAG_MASK);
+    free(data);
   }
 
   while (1) {
