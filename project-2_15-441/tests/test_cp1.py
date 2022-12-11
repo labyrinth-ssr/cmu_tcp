@@ -107,6 +107,7 @@ def test_run_server_client():
             connect_kwargs={"password": "vagrant"},
         ) as client_conn,
     ):
+        # here we seem to be wrong
         try:
             server_conn.run(start_server_cmd)
             server_conn.run("tmux has-session -t pytest_server")

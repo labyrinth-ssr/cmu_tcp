@@ -18,6 +18,8 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
+#include <time.h>
 
 uint16_t get_src(cmu_tcp_header_t* header) {
   return ntohs(header->source_port);
@@ -150,4 +152,35 @@ uint8_t* create_packet(uint16_t src, uint16_t dst, uint32_t seq, uint32_t ack,
   memcpy(pkt_payload, payload, payload_len);
 
   return packet;
+}
+
+void read_header(cmu_tcp_header_t* header){
+  struct timespec time_start = { 0, 0 };
+  clock_gettime(CLOCK_REALTIME, &time_start);
+  printf("---------------------------------------------------\nyour header received:(at %lu)\n\
+  identifier: %u\n\
+  source_port: %u | destination_port: %u\n\
+  seq_num: %u\n\
+  ack_num: %u\n\
+  hlen: %u | plen:%u | flags ack:%u,syn:%u,fin:%u\n\
+  advertised_window: %u | extension_length: %u\n\
+---------------------------------------------------\n", time_start.tv_nsec, header->identifier, get_src(header),  get_dst(header), get_seq(header), get_ack(header),
+   get_hlen(header), get_plen(header), get_flags(header) & ACK_FLAG_MASK, get_flags(header) & SYN_FLAG_MASK, get_flags(header) & FIN_FLAG_MASK ,
+   get_advertised_window(header), get_extension_length(header));
+}
+
+
+void send_header(cmu_tcp_header_t* header){
+  struct timespec time_start = { 0, 0 };
+  clock_gettime(CLOCK_REALTIME, &time_start);
+  printf("---------------------------------------------------\nyour header sending:(at %lu)\n\
+  identifier: %u\n\
+  source_port: %u | destination_port: %u\n\
+  seq_num: %u\n\
+  ack_num: %u\n\
+  hlen: %u | plen:%u | flags ack:%u,syn:%u,fin:%u\n\
+  advertised_window: %u | extension_length: %u\n\
+---------------------------------------------------\n", time_start.tv_nsec, header->identifier, get_src(header),  get_dst(header), get_seq(header), get_ack(header),
+   get_hlen(header), get_plen(header), get_flags(header) & ACK_FLAG_MASK, get_flags(header) & SYN_FLAG_MASK, get_flags(header) & FIN_FLAG_MASK ,
+   get_advertised_window(header), get_extension_length(header));
 }

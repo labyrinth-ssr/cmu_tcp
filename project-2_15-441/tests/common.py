@@ -42,7 +42,7 @@ else:
 
 # You might need to update these for the network setting on your VMs.
 IP_ADDRS = {"client": "10.0.1.2", "server": "10.0.1.1"}
-MAC_ADDRS = {"client": "08:00:27:a7:fe:b1", "server": "08:00:27:22:47:1c"}
+MAC_ADDRS = {"client": "02:42:0a:00:01:02", "server": "02:42:0a:00:01:01"}
 HOST_IP = IP_ADDRS[HOSTNAME]
 HOST_MAC = MAC_ADDRS[HOSTNAME]
 HOST_PORT = 1234

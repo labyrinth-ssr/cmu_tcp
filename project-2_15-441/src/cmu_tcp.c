@@ -20,9 +20,11 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <math.h>
 
 #include "backend.h"
 
+int issrand = 0;
 int cmu_socket(cmu_socket_t *sock, const cmu_socket_type_t socket_type,
                const int port, const char *server_ip) {
   int sockfd, optval;
@@ -48,10 +50,14 @@ int cmu_socket(cmu_socket_t *sock, const cmu_socket_type_t socket_type,
   sock->dying = 0;
   pthread_mutex_init(&(sock->death_lock), NULL);
 
-  // FIXME: Sequence numbers should be randomly initialized. The next expected
+  //todo: Sequence numbers should be randomly initialized. The next expected
   // sequence number should be initialized according to the SYN packet from the
   // other side of the connection.
-  sock->window.last_ack_received = 0;
+  if(issrand == 0) {
+    issrand = 1;
+    srand((unsigned)time(NULL));
+  }
+  sock->window.last_ack_received = rand()%(int)(pow(2,32));
   sock->window.next_seq_expected = 0;
   pthread_mutex_init(&(sock->window.ack_lock), NULL);
 
@@ -105,6 +111,8 @@ int cmu_socket(cmu_socket_t *sock, const cmu_socket_type_t socket_type,
   getsockname(sockfd, (struct sockaddr *)&my_addr, &len);
   sock->my_port = ntohs(my_addr.sin_port);
 
+  printf("cmu-socket create-pthread doing begin_backend\n");
+  //以这种形式进行，意味着一对一模式，不需要考虑多个client。
   pthread_create(&(sock->thread_id), NULL, begin_backend, (void *)sock);
   return EXIT_SUCCESS;
 }
@@ -146,6 +154,7 @@ int cmu_read(cmu_socket_t *sock, void *buf, int length, cmu_read_mode_t flags) {
   switch (flags) {
     case NO_FLAG:
       while (sock->received_len == 0) {
+        //用于阻塞当前线程,等待别的线程使用pthread_cond_signal()或pthread_cond_broadcast来唤醒它
         pthread_cond_wait(&(sock->wait_cond), &(sock->recv_lock));
       }
     // Fall through.
@@ -158,6 +167,7 @@ int cmu_read(cmu_socket_t *sock, void *buf, int length, cmu_read_mode_t flags) {
 
         memcpy(buf, sock->received_buf, read_len);
         if (read_len < sock->received_len) {
+          //? if read_len is less that received_len, then we should reduce the received_buff after reading it.
           new_buf = malloc(sock->received_len - read_len);
           memcpy(new_buf, sock->received_buf + read_len,
                  sock->received_len - read_len);
@@ -165,6 +175,7 @@ int cmu_read(cmu_socket_t *sock, void *buf, int length, cmu_read_mode_t flags) {
           sock->received_len -= read_len;
           sock->received_buf = new_buf;
         } else {
+          //? if there is no other data, we just free the received_buff.
           free(sock->received_buf);
           sock->received_buf = NULL;
           sock->received_len = 0;

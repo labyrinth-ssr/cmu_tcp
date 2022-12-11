@@ -18,6 +18,10 @@
 
 #include <stdint.h>
 
+#define bool char
+#define true 1
+#define false 0
+
 typedef struct {
   uint32_t identifier;         // Identifier for the CMU-TCP protocol.
   uint16_t source_port;        // Source port.
@@ -39,6 +43,7 @@ typedef struct {
 
 // Maximum Segment Size. Make sure to update this if your CCA requires extension
 // data for all packets, as this reduces the payload and thus the MSS.
+//最大段大小
 #define MSS (MAX_LEN - sizeof(cmu_tcp_header_t))
 
 /* Helper functions to get/set fields in the header */
@@ -171,5 +176,10 @@ static inline int after(uint32_t seq1, uint32_t seq2) {
 static inline int between(uint32_t seq, uint32_t low, uint32_t high) {
   return high - low >= seq - low;
 }
+
+
+
+void read_header(cmu_tcp_header_t* header);
+void send_header(cmu_tcp_header_t* header);
 
 #endif  // PROJECT_2_15_441_INC_CMU_PACKET_H_

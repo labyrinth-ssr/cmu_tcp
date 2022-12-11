@@ -28,8 +28,8 @@
 #define EXIT_FAILURE 1
 
 typedef struct {
-  uint32_t next_seq_expected;
-  uint32_t last_ack_received;
+  uint32_t next_seq_expected; //下一个期望的序列号
+  uint32_t last_ack_received; //上一次确认的序列号
   pthread_mutex_t ack_lock;
 } window_t;
 
@@ -46,6 +46,7 @@ typedef enum {
  * you see fit to include any additional state you need for your implementation.
  */
 typedef struct {
+  bool has_cnt;
   int socket;
   pthread_t thread_id;
   uint16_t my_port;
@@ -54,12 +55,14 @@ typedef struct {
   int received_len;
   pthread_mutex_t recv_lock;
   pthread_cond_t wait_cond;
+
   uint8_t* sending_buf;
   int sending_len;
   cmu_socket_type_t type;
   pthread_mutex_t send_lock;
   int dying;
   pthread_mutex_t death_lock;
+
   window_t window;
 } cmu_socket_t;
 
