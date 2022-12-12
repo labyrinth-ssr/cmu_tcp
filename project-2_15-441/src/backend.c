@@ -67,7 +67,6 @@ void handle_message(cmu_socket_t *sock, uint8_t *pkt) {
   uint8_t flags = get_flags(hdr);
 
   switch (flags) {
-    // it's acknowledge message from listener.
     case ACK_FLAG_MASK: {
       uint32_t ack = get_ack(hdr);
       if (after(ack, sock->window.last_ack_received)) {
@@ -75,15 +74,15 @@ void handle_message(cmu_socket_t *sock, uint8_t *pkt) {
       }
       break;
     }
+
+    // beginning of handshake in server. - wgy
     case SYN_FLAG_MASK:{
       if(get_hlen(hdr) != get_plen(hdr)) break;
       sock->window.next_seq_expected = get_seq(hdr) + 1;
-      pthread_mutex_unlock(&(sock->recv_lock));
       handshake_send(sock, NULL, 0, (SYN_FLAG_MASK | ACK_FLAG_MASK));
-      while (pthread_mutex_lock(&(sock->recv_lock)) != 0) {
-      }
       break;
     }
+    
     default: {
       socklen_t conn_len = sizeof(sock->conn);
       uint32_t seq = sock->window.last_ack_received;
@@ -98,31 +97,27 @@ void handle_message(cmu_socket_t *sock, uint8_t *pkt) {
 
       uint16_t src = sock->my_port;
       uint16_t dst = ntohs(sock->conn.sin_port);
-      uint32_t ack = get_seq(hdr) + get_payload_len(pkt);
+      
+      uint32_t ack = get_seq(hdr) + get_payload_len((uint8_t*)hdr);
       uint16_t hlen = sizeof(cmu_tcp_header_t);
       uint16_t plen = hlen + payload_len;
-      uint8_t flags = ACK_FLAG_MASK;//! seems like acknowledge with each other.
-      //todo here, here we send a packet which should contain data.
+      uint8_t flags = ACK_FLAG_MASK;
       uint16_t adv_window = 1;
       uint8_t *response_packet =
           create_packet(src, dst, seq, ack, hlen, plen, flags, adv_window,
                         ext_len, ext_data, payload, payload_len);
-      send_header(response_packet);
+      send_header((cmu_tcp_header_t *)response_packet);
       sendto(sock->socket, response_packet, plen, 0,
              (struct sockaddr *)&(sock->conn), conn_len);
       free(response_packet);
-
-      //! get sequence number
       seq = get_seq(hdr);
 
-
-      //yes which is indeed what we want about data.
+      //todo You may need to modify this to accommodate TCP cache or something. to sjr
       if (seq == sock->window.next_seq_expected) {
         sock->window.next_seq_expected = seq + get_payload_len(pkt);
         payload_len = get_payload_len(pkt);
         payload = get_payload(pkt);
-
-        // 确保buffer中有足够的空间存储负载。Make sure there is enough space in the buffer to store the payload.
+        // Make sure there is enough space in the buffer to store the payload.
         sock->received_buf =
             realloc(sock->received_buf, sock->received_len + payload_len);
         memcpy(sock->received_buf + sock->received_len, payload, payload_len);
@@ -145,7 +140,6 @@ void handle_message(cmu_socket_t *sock, uint8_t *pkt) {
  * MSG_PEEK: still retain data in stream after reading it.
  */
 void check_for_data(cmu_socket_t *sock, cmu_read_mode_t flags) {
-  //printf("    in_func: check_for_data\n");
   cmu_tcp_header_t hdr;
   uint8_t *pkt;
   socklen_t conn_len = sizeof(sock->conn);
@@ -179,7 +173,6 @@ void check_for_data(cmu_socket_t *sock, cmu_read_mode_t flags) {
       perror("ERROR unknown flag");
   }
 
-  //! if data is not empty, we storage it on pkt.
   if (len >= (ssize_t)sizeof(cmu_tcp_header_t)) {
     plen = get_plen(&hdr);
     pkt = malloc(plen);
@@ -189,17 +182,14 @@ void check_for_data(cmu_socket_t *sock, cmu_read_mode_t flags) {
       buf_size = buf_size + n;
     }
 
-    //! here we use func handle_message.
     handle_message(sock, pkt);
     free(pkt);
   }
   pthread_mutex_unlock(&(sock->recv_lock));
-  // printf("    out_func: check_for_data\n");
 }
 
 /**
- * todo Breaks up the data into packets and sends a single packet at a time.
- *! here we use check_data(). but signle_send only used in begin_backend().
+ * Breaks up the data into packets and sends a single packet at a time.
  * You should most certainly update this function in your implementation.
  *
  * @param sock The socket to use for sending data.
@@ -235,6 +225,8 @@ void single_send(cmu_socket_t *sock, uint8_t *data, int buf_len) {
 
       while (1) {
         //TODO: This is using stop and wait, can we do better?
+        //todo you should receive data disorderly: sending all data and timing the last one. or timing the correct ack optionally.
+        //todo you may set another cache to storage the data or ack before the correct data coming.
         send_header((cmu_tcp_header_t*)msg);
         sendto(sockfd, msg, plen, 0, (struct sockaddr *)&(sock->conn),
                conn_len);
@@ -255,7 +247,7 @@ bool handle_handshake(cmu_socket_t*sock, uint8_t *data, int buf_len, uint8_t* pk
   cmu_tcp_header_t* hdr = (cmu_tcp_header_t*)pkt;
   read_header(hdr);
   int flag = get_flags(hdr);
-  int this_flag = true;
+  bool this_flag = true;
   if(pkt == NULL){
     return false;
   }
@@ -266,17 +258,17 @@ bool handle_handshake(cmu_socket_t*sock, uint8_t *data, int buf_len, uint8_t* pk
       if(get_ack(hdr) != sock->window.last_ack_received + 1) {this_flag = false; break;}
       sock->window.last_ack_received = get_ack(hdr);
       sock->window.next_seq_expected = get_seq(hdr) + 1;
-      pthread_mutex_unlock(&(sock->recv_lock));
       handshake_send(sock, data, buf_len, ACK_FLAG_MASK);
-      while (pthread_mutex_lock(&(sock->recv_lock)) != 0) {
-      }
       break;
     }
+    //when server receive the third handshake package, they regard it as normal data package.
+    //when server receive, they send an ack package, so the block should also handle it when in initiator.
     case ACK_FLAG_MASK:{
-      printf("asssssaasa\n");
-      if(get_ack(hdr) != sock->window.last_ack_received + 1) {this_flag = false; break;}
-      set_flags(hdr, 0);
-      sock->window.last_ack_received = get_ack(hdr);
+      if(sock->type == TCP_LISTENER && get_ack(hdr) != sock->window.last_ack_received + 1) {this_flag = false; break;}
+      if(sock->type == TCP_LISTENER){
+        set_flags(hdr, 0);
+        sock->window.last_ack_received = get_ack(hdr);
+      }
       handle_message(sock, pkt);
       break;
     }
@@ -285,15 +277,13 @@ bool handle_handshake(cmu_socket_t*sock, uint8_t *data, int buf_len, uint8_t* pk
       break;
   }
   free(pkt);
-  pthread_mutex_unlock(&(sock->recv_lock)); 
-  return flag;
+  return this_flag;
 }
 
 
 /**
- * 如果返回值不为空，则需要做两件事情：
- * 1. 使用后释放pkt
- * 2. 释放receive锁
+ * if return value is not null, we should release pkt after using.
+ * in handshake procedure, we use timeout check to vetify
 */
 uint8_t* wait_check(cmu_socket_t* sock){
   cmu_tcp_header_t hdr;
@@ -301,13 +291,10 @@ uint8_t* wait_check(cmu_socket_t* sock){
   socklen_t conn_len = sizeof(sock->conn);
   ssize_t len = 0;
   uint32_t plen = 0, buf_size = 0, n = 0;
-  while (pthread_mutex_lock(&(sock->recv_lock)) != 0) {
-  }
   struct pollfd ack_fd;
   ack_fd.fd = sock->socket;
   ack_fd.events = POLLIN;
   if (poll(&ack_fd, 1, 3000) <= 0) {
-    pthread_mutex_unlock(&(sock->recv_lock));
     return NULL;
   }
   len = recvfrom(sock->socket, &hdr, sizeof(cmu_tcp_header_t),
@@ -324,14 +311,11 @@ uint8_t* wait_check(cmu_socket_t* sock){
     }
     return pkt;
   }
-  pthread_mutex_unlock(&(sock->recv_lock));
   return NULL;
 }
 
 
 void handshake_send(cmu_socket_t *sock, uint8_t *data, int b_len, int flag){
-  printf("sssssssssssssssssssssssss\n");
- 
   uint8_t *msg;
   uint8_t *data_offset = NULL;
   int buf_len = 0;
@@ -357,265 +341,17 @@ void handshake_send(cmu_socket_t *sock, uint8_t *data, int b_len, int flag){
 
   msg = create_packet(src, dst, seq, ack, hlen, plen, flags, adv_window, ext_len, ext_data, payload, payload_len);
   while (1) {
+    //for all three handshakes send and handle.
     send_header((cmu_tcp_header_t*)msg);
     sendto(sockfd, msg, plen, 0, (struct sockaddr *)&(sock->conn), conn_len);
-    printf("ssssaaaaaaaaaaaaaaaaaaaaaaa\n");
     if (handle_handshake(sock, data, b_len, wait_check(sock))) {
-      printf("ssssaaaaaaaaaaaaaaaaaaaaaaa\n");
       break;
     }
-    printf("ssssaaaaaaaaaaaaaaaaaaaaaaa\n");
 
   }
-  if(data_offset != NULL) single_send(sock, data_offset + payload_len, buf_len + payload_len);     
+  if(data_offset != NULL && (buf_len - payload_len) > 0) single_send(sock, data_offset + payload_len, buf_len - payload_len);     
 }
 
-
-void client_first_handshake(cmu_socket_t* sock){
-  printf("    in_func: client_first_handshake\n");
-  uint8_t *msg;
-  size_t conn_len = sizeof(sock->conn);
-  int sockfd = sock->socket;
-  uint16_t payload_len = 0;
-  uint16_t src = sock->my_port;
-  uint16_t dst = ntohs(sock->conn.sin_port);
-  uint32_t seq = sock->window.last_ack_received;
-  uint32_t ack = sock->window.next_seq_expected;
-  uint16_t hlen = sizeof(cmu_tcp_header_t);
-  uint16_t plen = hlen + payload_len;
-  uint16_t adv_window = 0;
-  uint16_t ext_len = 0;
-  uint8_t *ext_data = NULL;
-  uint8_t *payload = NULL;
-  uint8_t flags = SYN_FLAG_MASK;
-  msg = create_packet(src, dst, seq, ack, hlen, plen, flags, adv_window,
-                      ext_len, ext_data, payload, payload_len);
-    send_header((cmu_tcp_header_t*)msg);
-    sendto(sockfd, msg, plen, 0, (struct sockaddr *)&(sock->conn),
-            conn_len);
-  printf("    out_func: client_first_handshake\n");
-}
-
-bool handle_first_handshake(cmu_socket_t *sock){
-  bool satisfy = true;
-  cmu_tcp_header_t hdr;
-  uint8_t *pkt;
-  socklen_t conn_len = sizeof(sock->conn);
-  ssize_t len = 0;
-  uint32_t plen = 0, buf_size = 0, n = 0;
-  while (pthread_mutex_lock(&(sock->recv_lock)) != 0) {
-  }
-  struct pollfd ack_fd;
-  ack_fd.fd = sock->socket;
-  ack_fd.events = POLLIN;
-  if (poll(&ack_fd, 1, 3000) <= 0) {
-    pthread_mutex_unlock(&(sock->recv_lock));
-    return false;
-  }
-  len = recvfrom(sock->socket, &hdr, sizeof(cmu_tcp_header_t),
-                  MSG_DONTWAIT | MSG_PEEK, (struct sockaddr *)&(sock->conn),
-                  &conn_len);
-
-  if (len >= (ssize_t)sizeof(cmu_tcp_header_t)) {
-    plen = get_plen(&hdr);
-    pkt = malloc(plen);
-    while (buf_size < plen) {
-      n = recvfrom(sock->socket, pkt + buf_size, plen - buf_size, 0,
-                   (struct sockaddr *)&(sock->conn), &conn_len);
-      buf_size = buf_size + n;
-    }
-    cmu_tcp_header_t *hdr = (cmu_tcp_header_t *)pkt;
-    read_header(hdr);
-    if(get_hlen(hdr) != get_plen(hdr)) {
-      printf("111\n");
-      satisfy = false;
-    }
-    if(get_flags(hdr)!= SYN_FLAG_MASK) {
-      satisfy = false;
-      printf("222\n");
-    }
-    if(satisfy) {
-      sock->window.next_seq_expected = get_seq(hdr) + 1;
-    }
-    free(pkt);
-  }else{
-    satisfy = false;
-  }
-  pthread_mutex_unlock(&(sock->recv_lock));
-  printf("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n");
-  if(!satisfy) return false;
-  uint32_t seq = sock->window.last_ack_received;
-  uint8_t *payload = NULL;
-  uint16_t payload_len = 0;
-  uint16_t ext_len = 0;
-  uint8_t *ext_data = NULL;
-  uint16_t src = sock->my_port;
-  uint16_t dst = ntohs(sock->conn.sin_port);
-  uint32_t ack = sock->window.next_seq_expected;
-  uint16_t hlen = sizeof(cmu_tcp_header_t);
-  uint16_t plen_ = hlen + payload_len;
-  uint8_t flags = ACK_FLAG_MASK + SYN_FLAG_MASK;
-  uint16_t adv_window = 1;
-  uint8_t *response_packet =
-  create_packet(src, dst, seq, ack, hlen, plen_, flags, adv_window,
-                ext_len, ext_data, payload, payload_len);
-  send_header(response_packet);
-  sendto(sock->socket, response_packet, plen, 0,
-    (struct sockaddr *)&(sock->conn), conn_len);
-  free(response_packet);
-  return true;
-}
-
-bool handle_second_handshake(cmu_socket_t *sock){
-    bool satisfy = true;
-  cmu_tcp_header_t hdr;
-  uint8_t *pkt;
-  socklen_t conn_len = sizeof(sock->conn);
-  ssize_t len = 0;
-  uint32_t plen = 0, buf_size = 0, n = 0;
-  while (pthread_mutex_lock(&(sock->recv_lock)) != 0) {
-  }
-  struct pollfd ack_fd;
-  ack_fd.fd = sock->socket;
-  ack_fd.events = POLLIN;
-  if (poll(&ack_fd, 1, 3000) <= 0) {
-    pthread_mutex_unlock(&(sock->recv_lock));
-    return false;
-  }
-  len = recvfrom(sock->socket, &hdr, sizeof(cmu_tcp_header_t),
-                  MSG_DONTWAIT | MSG_PEEK, (struct sockaddr *)&(sock->conn),
-                  &conn_len);
-
-  if (len >= (ssize_t)sizeof(cmu_tcp_header_t)) {
-    plen = get_plen(&hdr);
-    pkt = malloc(plen);
-    while (buf_size < plen) {
-      n = recvfrom(sock->socket, pkt + buf_size, plen - buf_size, 0,
-                   (struct sockaddr *)&(sock->conn), &conn_len);
-      buf_size = buf_size + n;
-    }
-    cmu_tcp_header_t *hdr = (cmu_tcp_header_t *)pkt;
-    read_header(hdr);
-    if(get_hlen(hdr) != get_plen(hdr)){
-      satisfy = false;
-    }
-    if(get_flags(hdr)!= (SYN_FLAG_MASK | ACK_FLAG_MASK)) {
-      satisfy = false;
-    }
-    if(satisfy){
-      sock->window.next_seq_expected = get_seq(hdr) + 1;
-      sock->window.last_ack_received = get_ack(hdr);
-    }
-    free(pkt);
-  }else{
-    satisfy = false;
-  }
-  pthread_mutex_unlock(&(sock->recv_lock));
-  printf("satisfy:%d\n",satisfy);
-  return satisfy;
-}
-
-void client_third_handshake(cmu_socket_t *sock){
-  int death, buf_len, send_signal;
-  uint8_t *data;
-  while (pthread_mutex_lock(&(sock->send_lock)) != 0) {
-  }
-  buf_len = sock->sending_len;
-  if (buf_len > 0) {
-      data = malloc(buf_len);
-      memcpy(data, sock->sending_buf, buf_len);
-      sock->sending_len = 0;
-      free(sock->sending_buf);
-      sock->sending_buf = NULL;
-      pthread_mutex_unlock(&(sock->send_lock));
-      printf("    in_func: signal_send\n");
-  uint8_t *msg;
-  uint8_t *data_offset = data;
-  size_t conn_len = sizeof(sock->conn);
-
-  int sockfd = sock->socket;
-
-
-  if (buf_len > 0) {
-    while (buf_len != 0) {
-      uint16_t src = sock->my_port;
-      uint16_t dst = ntohs(sock->conn.sin_port);
-      uint32_t seq = sock->window.last_ack_received;
-      uint32_t ack = sock->window.next_seq_expected;
-      uint16_t hlen = sizeof(cmu_tcp_header_t);
-      uint16_t adv_window = 1;
-      uint16_t ext_len = 0;
-      uint8_t *ext_data = NULL;
-      uint8_t flags = ACK_FLAG_MASK;
-      uint16_t payload_len = MIN((uint16_t)buf_len, (uint16_t)MSS);
-      uint16_t plen = hlen + payload_len;
-      uint8_t *payload = data_offset;
-      msg = create_packet(src, dst, seq, ack, hlen, plen, flags, adv_window,
-                          ext_len, ext_data, payload, payload_len);
-      buf_len -= payload_len;
-
-      while (1) {
-        send_header((cmu_tcp_header_t*)msg);
-        sendto(sockfd, msg, plen, 0, (struct sockaddr *)&(sock->conn),
-               conn_len);
-        check_for_data(sock, TIMEOUT);
-        if (has_been_acked(sock, seq)) {
-          break;
-        }
-      }
-
-      data_offset += payload_len;
-    }
-  }
-  printf("    out_func: signal_send\n");
-      free(data);
-    } else {
-      pthread_mutex_unlock(&(sock->send_lock));
-    }
-}
-
-void handle_third_handshake(cmu_socket_t *sock){
-  bool satisfy = true;
-  uint8_t *pkt;
-  socklen_t conn_len = sizeof(sock->conn);
-  ssize_t len = 0;
-  uint32_t plen = 0, buf_size = 0, n = 0;
-  cmu_tcp_header_t hdr;
-  while (pthread_mutex_lock(&(sock->recv_lock)) != 0) {
-  }
-  // Using `poll` here so that we can specify a timeout.
-  struct pollfd ack_fd;
-  ack_fd.fd = sock->socket;
-  ack_fd.events = POLLIN;
-  // Timeout after 3 seconds.
-  if (poll(&ack_fd, 1, 3000) <= 0) {
-    pthread_mutex_unlock(&(sock->recv_lock));
-    return;
-  }
-// Fallthrough.
-  len = recvfrom(sock->socket, &hdr, sizeof(cmu_tcp_header_t),
-                  MSG_DONTWAIT | MSG_PEEK, (struct sockaddr *)&(sock->conn),
-                  &conn_len);
-  if (len >= (ssize_t)sizeof(cmu_tcp_header_t)) {
-    plen = get_plen(&hdr);
-    pkt = malloc(plen);
-    while (buf_size < plen) {
-      n = recvfrom(sock->socket, pkt + buf_size, plen - buf_size, 0,
-                   (struct sockaddr *)&(sock->conn), &conn_len);
-      buf_size = buf_size + n;
-    }
-    cmu_tcp_header_t* header = (cmu_tcp_header_t*)pkt;
-    if(get_flags(header) != ACK_FLAG_MASK) satisfy = false;
-    if(get_ack(header) != sock->window.last_ack_received + 1) satisfy=false;
-    if(satisfy){
-      set_flags(header, 0);
-      sock->window.last_ack_received = get_ack(header);
-      handle_message(sock, pkt);
-    }
-    free(pkt);
-  }
-  pthread_mutex_unlock(&(sock->recv_lock));
-}
 
 void *begin_backend(void *in) {
   printf("    in_func: begin_background\n");
@@ -623,27 +359,9 @@ void *begin_backend(void *in) {
   int death, buf_len, send_signal;
   uint8_t *data = NULL;
 
-  // while(sock->type == TCP_INITIATOR){
-  //   client_first_handshake(sock);
-  //   if (!handle_second_handshake(sock)) {
-  //     continue;
-  //   }
-  //   client_third_handshake(sock);
-  //   // check_for_data(sock, TIMEOUT);
-  //   break;
-  // }
 
-  // while(sock->type == TCP_LISTENER){
-  //   printf("a\n");
-  //   if(!handle_first_handshake(sock)){
-  //     continue;
-  //   }
-  //   handle_third_handshake(sock);
-  //   // exit(0);
-  //   break;
-  // }
-
-  while(sock->type == TCP_INITIATOR){
+  //Here we prepare initaitor to start the handshake transaction
+  if(sock->type == TCP_INITIATOR){
     while (pthread_mutex_lock(&(sock->send_lock)) != 0) {
     }
     buf_len = sock->sending_len;
@@ -656,6 +374,7 @@ void *begin_backend(void *in) {
     }
     pthread_mutex_unlock(&(sock->send_lock));
     handshake_send(sock, data, buf_len, SYN_FLAG_MASK);
+    printf("    handshake done!\n");
     free(data);
   }
 
@@ -673,7 +392,6 @@ void *begin_backend(void *in) {
       break;
     }
 
-    //只有需要发送数据时才会执行single_send.  即sending_len > 0时。
     if (buf_len > 0) {
       data = malloc(buf_len);
       memcpy(data, sock->sending_buf, buf_len);
@@ -698,7 +416,6 @@ void *begin_backend(void *in) {
     pthread_mutex_unlock(&(sock->recv_lock));
 
     if (send_signal) {
-      //发送一个信号给另外一个正在处于阻塞等待状态的线程,使其脱离阻塞状态
       pthread_cond_signal(&(sock->wait_cond));
     }
   }

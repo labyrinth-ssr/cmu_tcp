@@ -35,30 +35,26 @@ void functionality(cmu_socket_t *sock) {
   int n;
 
   // read buff from sock.
-  printf("server socket read\n");
   n = cmu_read(sock, buf, BUF_SIZE, NO_FLAG);
   printf("R: %s\n", buf);
   printf("N: %d\n", n);
-  printf("server socket write\n");
   cmu_write(sock, "hi there", 9);
-  printf("server socket read\n");
   n = cmu_read(sock, buf, 200, NO_FLAG);
   printf("R: %s\n", buf);
   printf("N: %d\n", n);
 
   //write the url.
-  printf("server socket write\n");
   cmu_write(sock, "https://www.youtube.com/watch?v=dQw4w9WgXcQ", 44);
 
   sleep(1);
   //read again
-  printf("server socket read\n");
   n = cmu_read(sock, buf, BUF_SIZE, NO_FLAG);
   printf("N: %d\n", n);
 
   //write buf data to file.
   fp = fopen("/tmp/file.c", "w");
   fwrite(buf, 1, n, fp);
+  printf("READY TO CLOSE\n");
   fclose(fp);
 }
 

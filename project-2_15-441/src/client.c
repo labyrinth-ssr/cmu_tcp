@@ -23,14 +23,12 @@ void functionality(cmu_socket_t *sock) {
   int read;
   FILE *fp;
 
-  printf("client_write\n");
   cmu_write(sock, "hi there", 8);
   cmu_write(sock, " https://www.youtube.com/watch?v=dQw4w9WgXcQ", 44);
   cmu_write(sock, " https://www.youtube.com/watch?v=Yb6dZ1IFlKc", 44);
   cmu_write(sock, " https://www.youtube.com/watch?v=xvFZjo5PgG0", 44);
   cmu_write(sock, " https://www.youtube.com/watch?v=8ybW48rKBME", 44);
   cmu_write(sock, " https://www.youtube.com/watch?v=xfr64zoBTAQ", 45);//176+45+8=221+8=229
-  printf("client_write\n");
 
   cmu_read(sock, buf, 200, NO_FLAG);
 
