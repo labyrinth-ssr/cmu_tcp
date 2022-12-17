@@ -28,7 +28,8 @@ void functionality(cmu_socket_t *sock) {
   cmu_write(sock, " https://www.youtube.com/watch?v=Yb6dZ1IFlKc", 44);
   cmu_write(sock, " https://www.youtube.com/watch?v=xvFZjo5PgG0", 44);
   cmu_write(sock, " https://www.youtube.com/watch?v=8ybW48rKBME", 44);
-  cmu_write(sock, " https://www.youtube.com/watch?v=xfr64zoBTAQ", 45);
+  cmu_write(sock, " https://www.youtube.com/watch?v=xfr64zoBTAQ", 45);//176+45+8=221+8=229
+
   cmu_read(sock, buf, 200, NO_FLAG);
 
   cmu_write(sock, "hi there", 9);
@@ -71,6 +72,8 @@ int main() {
   if (cmu_socket(&socket, TCP_INITIATOR, portno, serverip) < 0) {
     exit(EXIT_FAILURE);
   }
+
+  printf("client socket created\n");
 
   functionality(&socket);
 

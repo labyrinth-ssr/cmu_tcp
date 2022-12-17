@@ -28,7 +28,7 @@ void functionality(cmu_socket_t *sock) {
   int n;
   int read;
 
-  // Wait to hear from an initiator
+  //! Wait to hear from an initiator
   n = 0;
   while (n == 0) {
     n = cmu_read(sock, buf, 9898, NO_FLAG);

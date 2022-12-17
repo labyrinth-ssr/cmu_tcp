@@ -20,9 +20,11 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <math.h>
 
 #include "backend.h"
 
+int issrand = 0;
 int cmu_socket(cmu_socket_t *sock, const cmu_socket_type_t socket_type,
                const int port, const char *server_ip) {
   int sockfd, optval;
@@ -48,10 +50,14 @@ int cmu_socket(cmu_socket_t *sock, const cmu_socket_type_t socket_type,
   sock->dying = 0;
   pthread_mutex_init(&(sock->death_lock), NULL);
 
-  // FIXME: Sequence numbers should be randomly initialized. The next expected
+  //done Sequence numbers should be randomly initialized. The next expected
   // sequence number should be initialized according to the SYN packet from the
   // other side of the connection.
-  sock->window.last_ack_received = 0;
+  if(issrand == 0) {
+    issrand = 1;
+    srand((unsigned)time(NULL));
+  }
+  sock->window.last_ack_received = rand()%(int)(pow(2,32));
   sock->window.next_seq_expected = 0;
   pthread_mutex_init(&(sock->window.ack_lock), NULL);
 
@@ -105,6 +111,8 @@ int cmu_socket(cmu_socket_t *sock, const cmu_socket_type_t socket_type,
   getsockname(sockfd, (struct sockaddr *)&my_addr, &len);
   sock->my_port = ntohs(my_addr.sin_port);
 
+  printf("cmu-socket create-pthread doing begin_backend\n");
+  //以这种形式进行，意味着一对一模式，不需要考虑多个client。
   pthread_create(&(sock->thread_id), NULL, begin_backend, (void *)sock);
   return EXIT_SUCCESS;
 }
@@ -139,13 +147,12 @@ int cmu_read(cmu_socket_t *sock, void *buf, int length, cmu_read_mode_t flags) {
     perror("ERROR negative length");
     return EXIT_ERROR;
   }
-
   while (pthread_mutex_lock(&(sock->recv_lock)) != 0) {
   }
-
   switch (flags) {
     case NO_FLAG:
       while (sock->received_len == 0) {
+        //用于阻塞当前线程,等待别的线程使用pthread_cond_signal()或pthread_cond_broadcast来唤醒它
         pthread_cond_wait(&(sock->wait_cond), &(sock->recv_lock));
       }
     // Fall through.

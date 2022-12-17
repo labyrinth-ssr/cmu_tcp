@@ -18,6 +18,8 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
+#include <time.h>
 
 uint16_t get_src(cmu_tcp_header_t* header) {
   return ntohs(header->source_port);
@@ -150,4 +152,40 @@ uint8_t* create_packet(uint16_t src, uint16_t dst, uint32_t seq, uint32_t ack,
   memcpy(pkt_payload, payload, payload_len);
 
   return packet;
+}
+
+void read_header(cmu_tcp_header_t* header){
+  struct timespec time_start = { 0, 0 };
+  clock_gettime(CLOCK_REALTIME, &time_start);
+  printf("RECEIVE -----------------------------------------\n|your header received:(at %lu)\t\t|\n|\
+  identifier: %u\t\t\t|\n|\
+  source_port: %u |destination_port: %u\t|\n|\
+  seq_num: %u\t\t\t\t|\n|\
+  ack_num: %u\t\t\t\t|\n|\
+  hlen: %u |plen:%u |flags ack:%u,syn:%u,fin:%u\t|\n|\
+  advertised_window: %u |extension_length: %u\t|\n|\
+------------------------------------------------\n\n", time_start.tv_nsec, header->identifier, get_src(header),  get_dst(header), get_seq(header), get_ack(header),
+   get_hlen(header), get_plen(header), get_flags(header) & ACK_FLAG_MASK, get_flags(header) & SYN_FLAG_MASK, get_flags(header) & FIN_FLAG_MASK ,
+   get_advertised_window(header), get_extension_length(header));
+}
+
+
+void send_header(cmu_tcp_header_t* header){
+  struct timespec time_start = { 0, 0 };
+  clock_gettime(CLOCK_REALTIME, &time_start);
+  char* str = malloc(21);
+  str[0] = '\0';
+  if(get_payload_len((uint8_t *)header)) memcpy(str, get_payload((uint8_t *)header), 20);
+  str[20] = '\0';
+  printf("SEND --------------------------------------------\n|your header sending:(at %lu)\t\t|\n|\
+  identifier: %u\t\t\t|\n|\
+  source_port: %u |destination_port: %u\t|\n|\
+  seq_num: %u\t\t\t\t|\n|\
+  ack_num: %u\t\t\t\t|\n|\
+  hlen: %u |plen:%u |flags ack:%u,syn:%u,fin:%u\t|\n|\
+  advertised_window: %u |extension_length: %u\t|\n|\
+  data: %s\n|\
+------------------------------------------------\n\n", time_start.tv_nsec, header->identifier, get_src(header),  get_dst(header), get_seq(header), get_ack(header),
+   get_hlen(header), get_plen(header), get_flags(header) & ACK_FLAG_MASK, get_flags(header) & SYN_FLAG_MASK, get_flags(header) & FIN_FLAG_MASK ,
+   get_advertised_window(header), get_extension_length(header), str);
 }
