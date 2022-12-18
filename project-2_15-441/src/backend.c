@@ -112,7 +112,7 @@ void handle_message(cmu_socket_t *sock, uint8_t *pkt) {
       free(response_packet);
       seq = get_seq(hdr);
 
-      //todo You may need to modify this to accommodate TCP cache or something. to sjr
+      //todo You may need to modify this to accommodate TCP cache or something. to ssr
       if (seq == sock->window.next_seq_expected) {
         sock->window.next_seq_expected = seq + get_payload_len(pkt);
         payload_len = get_payload_len(pkt);
@@ -352,6 +352,7 @@ void handshake_send(cmu_socket_t *sock, uint8_t *data, int b_len, int flag){
   if(data_offset != NULL && (buf_len - payload_len) > 0) single_send(sock, data_offset + payload_len, buf_len - payload_len);     
 }
 
+// int sendSW()
 
 void *begin_backend(void *in) {
   printf("    in_func: begin_background\n");
@@ -359,13 +360,12 @@ void *begin_backend(void *in) {
   int death, buf_len, send_signal;
   uint8_t *data = NULL;
 
-
   //Here we prepare initaitor to start the handshake transaction
   if(sock->type == TCP_INITIATOR){
     while (pthread_mutex_lock(&(sock->send_lock)) != 0) {
     }
     buf_len = sock->sending_len;
-    if(buf_len != 0){ 
+    if(buf_len != 0){
       data = malloc(buf_len);
       memcpy(data, sock->sending_buf, buf_len);
       sock->sending_len = 0;

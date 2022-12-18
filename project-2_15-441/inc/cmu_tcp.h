@@ -30,6 +30,7 @@
 typedef struct {
   uint32_t next_seq_expected; //下一个期望的序列号
   uint32_t last_ack_received; //上一次确认的序列号
+  // uint32_t last_frame_sent;
   pthread_mutex_t ack_lock;
 } window_t;
 
