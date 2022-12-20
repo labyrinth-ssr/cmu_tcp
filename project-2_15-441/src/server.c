@@ -62,7 +62,7 @@ int main() {
   char *serverip;
   char *serverport;
   cmu_socket_t socket;
-  printf("1");
+  
   serverip = getenv("server15441");
   if (!serverip) {
     serverip = "172.17.0.4";

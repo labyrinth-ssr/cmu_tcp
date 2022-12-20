@@ -50,13 +50,10 @@ void functionality(cmu_socket_t *sock) {
 }
 
 int main() {
-  printf("2");
-
   int portno;
   char *serverip;
   char *serverport;
   cmu_socket_t socket;
-
 
   serverip = getenv("server15441");
   if (!serverip) {
