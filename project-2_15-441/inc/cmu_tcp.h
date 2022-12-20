@@ -30,7 +30,7 @@
 #define MAX_RCV_BUFFER 10
 #define MAX_SEND_BUFFER 10
 #define SWP_SEND_TIMEOUT 3000
-#define MAX_SEQ_NUM 30
+#define MAX_SEQ_NUM INT32_MAX
 
 typedef uint32_t Seqno;
 typedef int Event;
@@ -39,7 +39,7 @@ typedef struct {
   Seqno last_ack_received; 
   Seqno last_seq_sent;
   pthread_cond_t sendWindowNotFull;
-  pthread_mutex_t window_lock;
+  pthread_mutex_t window_full_lock;
 
   struct sendQ_slot{
     Event timeout;
@@ -85,6 +85,8 @@ typedef struct {
   pthread_mutex_t send_lock;
   int dying;
   pthread_mutex_t death_lock;
+
+  uint16_t adv_win_size;
 
   window_t window;
 } cmu_socket_t;

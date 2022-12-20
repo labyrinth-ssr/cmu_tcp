@@ -15,6 +15,7 @@
 
 #include <arpa/inet.h>
 #include <netinet/in.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -57,7 +58,8 @@ int cmu_socket(cmu_socket_t *sock, const cmu_socket_type_t socket_type,
     issrand = 1;
     srand((unsigned)time(NULL));
   }
-  sock->window.last_ack_received = rand()%(int)(pow(2,32));
+
+  sock->window.last_ack_received = (uint32_t)rand();
   sock->window.next_seq_expected = 0;
   pthread_mutex_init(&(sock->window.ack_lock), NULL);
 

@@ -32,7 +32,7 @@
 
 #define MIN(X, Y) (((X) < (Y)) ? (X) : (Y))
 
-int last_advertised_window=MAX_RCV_BUFFER;
+// int last_advertised_window=MAX_RCV_BUFFER;
 
 /**
  * Tells if a given sequence number has been acknowledged by the socket.
@@ -75,6 +75,7 @@ void handle_message(cmu_socket_t *sock, uint8_t *pkt) {
       uint32_t ack = get_ack(hdr);
       if (after(ack, sock->window.last_ack_received)) {
         sock->window.last_ack_received = ack;
+        sock->adv_win_size = get_advertised_window(hdr);
       }
       break;
     }
@@ -186,9 +187,8 @@ bool check_for_data(cmu_socket_t *sock, cmu_read_mode_t flags) {
       n = recvfrom(sock->socket, pkt + buf_size, plen - buf_size, 0,
                    (struct sockaddr *)&(sock->conn), &conn_len);
       buf_size = buf_size + n;
-      sock->window.last_seq_read= (sock->window.last_seq_read +n)%30;
+      // sock->window.last_seq_read= sock->window.last_seq_read +n;
     }
-
     handle_message(sock, pkt);
     free(pkt);
   }
@@ -261,11 +261,15 @@ int evSchedule(){
 void evCancel(Event timeout){
 }
 
-int sendSWP (cmu_socket_t* sock,window_t* window,cmu_tcp_header_t* frame){
+int sendSWP (cmu_socket_t* sock,cmu_tcp_header_t* frame){
   struct sendQ_slot* slot;
-  while (pthread_mutex_lock(&window->window_lock)!=0) {
+  window_t* window = &sock->window;
+  size_t conn_len = sizeof(sock->conn);
+  int sockfd = sock->socket;
+  while (pthread_mutex_lock(&window->window_full_lock)!=0) {
   }
-  pthread_cond_wait(&window->sendWindowNotFull, &window->window_lock);
+  pthread_cond_wait(&window->sendWindowNotFull, &window->window_full_lock);
+  pthread_mutex_unlock(&window->window_full_lock);
   uint32_t seq = ++window->last_seq_sent;
   slot=&window->sendQ[seq % get_advertised_window(frame)];
   msgSaveCopy(&slot->msg, frame);
@@ -273,10 +277,8 @@ int sendSWP (cmu_socket_t* sock,window_t* window,cmu_tcp_header_t* frame){
   slot->timeout= evSchedule();
   check_for_data(sock, TIMEOUT);
   send_header(frame);
-  int res = sendto(sock->socket,frame, get_plen(frame), 0, (struct sockaddr *)&(sock->conn),
-          sizeof(sock->conn));
-  //锁要保护哪一段？
-  pthread_mutex_unlock(&window->window_lock);
+  int res = sendto(sockfd,frame, get_plen(frame), 0, (struct sockaddr *)&(sock->conn),
+          conn_len);
   return res;
 }
 
@@ -284,48 +286,60 @@ void sw_send(cmu_socket_t *sock,uint8_t *data, int buf_len){
 
   uint8_t *msg;
   uint8_t *data_offset = data;
-  // size_t conn_len = sizeof(sock->conn);
-  // int sockfd = sock->socket;
   window_t* window=&sock->window;
+  uint32_t seq = sock->window.last_ack_received;
 
   if (buf_len > 0) {
     while (buf_len != 0) {
       uint16_t src = sock->my_port;
       uint16_t dst = ntohs(sock->conn.sin_port);
-      uint32_t seq = sock->window.last_ack_received;
       uint32_t ack = sock->window.next_seq_expected;
       uint16_t hlen = sizeof(cmu_tcp_header_t);
-      uint16_t adv_window = last_advertised_window;
+      uint16_t adv_window = 1;//no usage
       uint16_t ext_len = 0;
       uint8_t *ext_data = NULL;
       uint8_t flags = 0;
+
+      uint16_t effective_win_size = sock->adv_win_size - (window->last_seq_sent-window->last_ack_received);
       uint16_t payload_len = MIN((uint16_t)buf_len, (uint16_t)MSS);
+      if (effective_win_size < payload_len) {
+          while (1) {
+            if (has_been_acked(sock, window->last_ack_received+1)) {
+              payload_len = MIN(effective_win_size, payload_len);
+              break;
+            }
+          }
+      }
+      //  =  effective_win_size>=MSG_SYN ? MIN((uint16_t)buf_len, (uint16_t)MSS);
       uint16_t plen = hlen + payload_len;
       uint8_t *payload = data_offset;
 
       buf_len -= payload_len;
-        //todo you should receive data disorderly: sending all data and timing the last one. or timing the correct ack optionally.
-        //todo you may set another cache to storage the data or ack before the correct data coming.
-        msg = create_packet(src, dst, seq, ack, hlen, plen, flags, adv_window,
+      msg = create_packet(src, dst, seq, ack, hlen, plen, flags, adv_window,
                           ext_len, ext_data, payload, payload_len);
-        sendSWP(sock, &sock->window, (cmu_tcp_header_t*)msg);
+      struct sendQ_slot* slot;
+      cmu_tcp_header_t* frame = (cmu_tcp_header_t*)msg;
+      
+      window_t* window = &sock->window;
+      size_t conn_len = sizeof(sock->conn);
+      int sockfd = sock->socket;
+      // while (pthread_mutex_lock(&window->window_full_lock)!=0) {
+      // }
+      // pthread_cond_wait(&window->sendWindowNotFull, &window->window_full_lock);
+      // pthread_mutex_unlock(&window->window_full_lock);
+      seq += payload_len;
+      slot=&window->sendQ[seq % get_advertised_window(frame)];
+      msgSaveCopy(&slot->msg, frame);
+      // TODO:set timeout and then?
+      slot->timeout= evSchedule();
+      check_for_data(sock, TIMEOUT);
+      send_header(frame);
+      sendto(sockfd,frame, get_plen(frame), 0, (struct sockaddr *)&(sock->conn),conn_len);
         // 什么时候检查ack？什么时候不发送？
         // 不发送：一个packet大小就是MSS和data的最小值，
-        // 不发送：发送窗口大小的限制。这里的窗口似乎以字节为限制。
       data_offset += payload_len;
     }
   }
-}
-
-// seq_no be in range [min..max]
-bool swpInWindow(Seqno seqno,Seqno min,Seqno max){
-  Seqno pos,maxpos;
-  if (seqno<min) {
-  return false;
-  }
-    pos = seqno - min;       /* pos *should* be in range [0..MAX) */
-    maxpos = max - min + 1;     /* maxpos is in range [0..MAX] */
-    return pos < maxpos;
 }
 
 void handle_message_sw(cmu_socket_t *sock, uint8_t *pkt) {
@@ -337,13 +351,14 @@ void handle_message_sw(cmu_socket_t *sock, uint8_t *pkt) {
 
   switch (flags) {
     case ACK_FLAG_MASK:{
-      if (swpInWindow(get_ack(hdr), window->last_ack_received+1, window->last_seq_sent+1)) {
+      if (between(get_ack(hdr), window->last_ack_received+1, window->last_seq_sent+1)) {
       do {
         struct sendQ_slot* slot;
+        // window->last_ack_received = 
         slot = &window->sendQ[++window->last_ack_received%get_advertised_window(hdr)];
         evCancel(slot->timeout);
         msgDestroy(&slot->msg);
-        pthread_cond_signal(&window->sendWindowNotFull);
+        // pthread_cond_signal(&window->sendWindowNotFull);
       }while (window->last_ack_received != get_ack(hdr));
     }
       break;
@@ -358,14 +373,14 @@ void handle_message_sw(cmu_socket_t *sock, uint8_t *pkt) {
     
     default: {
       uint32_t seq = get_seq(hdr);
-
       struct recvQ_slot* slot;
-      // 何时设置advertised_window
-      slot=&window->recvQ[seq % get_advertised_window(hdr)];
-      if (!swpInWindow(seq, window->next_seq_expected, window->next_seq_expected+get_advertised_window(hdr)-1)) {
+      // 接收窗口的大小：由自己决定
+      uint16_t rcv_win_size = MAX_RCV_BUFFER - ((window->next_seq_expected-1)-window->last_seq_read);
+      slot=&window->recvQ[seq % rcv_win_size];
+      if (!between(seq, window->next_seq_expected, window->next_seq_expected+get_advertised_window(hdr)-1)) {
         return;
       }
-      msgSaveCopy(&slot->msg,hdr);
+      msgSaveCopy(&slot->msg,hdr);//应该没事吧
       slot->received = true;
       if (seq==window->next_seq_expected) {
 
@@ -378,15 +393,14 @@ void handle_message_sw(cmu_socket_t *sock, uint8_t *pkt) {
               realloc(sock->received_buf, sock->received_len + payload_len);
           memcpy(sock->received_buf + sock->received_len, payload, payload_len);
           sock->received_len += payload_len;
-
+          window->last_seq_read += payload_len;
           msgDestroy(&slot->msg);
           slot->received=false;
-          window->next_seq_expected = seq + get_payload_len(pkt);
+          window->next_seq_expected = seq + payload_len;
           slot = &window->recvQ[window->next_seq_expected%get_advertised_window(hdr)];
         }
         socklen_t conn_len = sizeof(sock->conn);
-        uint32_t seq = sock->window.last_ack_received;
-
+        seq = sock->window.last_ack_received;
         // No payload.
         uint8_t *payload = NULL;
         uint16_t payload_len = 0;
@@ -401,7 +415,7 @@ void handle_message_sw(cmu_socket_t *sock, uint8_t *pkt) {
         uint16_t hlen = sizeof(cmu_tcp_header_t);
         uint16_t plen = hlen + payload_len;
         uint8_t flags = ACK_FLAG_MASK;
-        uint16_t adv_window = MAX_RCV_BUFFER - ((window->next_seq_expected - 1) - LastByteRead);
+        uint16_t adv_window = MAX_RCV_BUFFER - ((window->next_seq_expected - 1) - window->last_seq_read);
         uint8_t *response_packet =
             create_packet(src, dst, seq, ack, hlen, plen, flags, adv_window,
                           ext_len, ext_data, payload, payload_len);
@@ -495,11 +509,7 @@ void handshake_send(cmu_socket_t *sock, uint8_t *data, int b_len, int flag){
     data_offset = data;
     buf_len = b_len;
   }
-  
-  sock->window.last_ack_received = rand()%(int)(pow(2,32));
-  if (flag == (SYN_FLAG_MASK | ACK_FLAG_MASK)) {
-    sock->window.last_seq_sent = 
-  }
+
   size_t conn_len = sizeof(sock->conn);
   int sockfd = sock->socket;
 
@@ -508,7 +518,7 @@ void handshake_send(cmu_socket_t *sock, uint8_t *data, int b_len, int flag){
   uint32_t seq = sock->window.last_ack_received;
   uint32_t ack = sock->window.next_seq_expected;
   uint16_t hlen = sizeof(cmu_tcp_header_t);
-  uint16_t adv_window = 1;
+  uint16_t adv_window = MAX_RCV_BUFFER;
   uint16_t ext_len = 0;
   uint8_t *ext_data = NULL;
   uint16_t payload_len = MIN((uint16_t)buf_len, (uint16_t)MSS);
@@ -524,7 +534,6 @@ void handshake_send(cmu_socket_t *sock, uint8_t *data, int b_len, int flag){
     if (handle_handshake(sock, data, b_len, wait_check(sock))) {
       break;
     }
-
   }
   if(data_offset != NULL && (buf_len - payload_len) > 0) single_send(sock, data_offset + payload_len, buf_len - payload_len);     
 }
@@ -532,6 +541,7 @@ void handshake_send(cmu_socket_t *sock, uint8_t *data, int b_len, int flag){
 void *begin_backend(void *in) {
   printf("    in_func: begin_background\n");
   cmu_socket_t *sock = (cmu_socket_t *)in;
+  uint8_t adv_win_size = MAX_RCV_BUFFER;
   int death, buf_len, send_signal;
   uint8_t *data = NULL;
 
@@ -574,7 +584,7 @@ void *begin_backend(void *in) {
       free(sock->sending_buf);
       sock->sending_buf = NULL;
       pthread_mutex_unlock(&(sock->send_lock));
-      single_send(sock, data, buf_len);
+      sw_send(sock, data, buf_len);
       free(data);
     } else {
       pthread_mutex_unlock(&(sock->send_lock));
