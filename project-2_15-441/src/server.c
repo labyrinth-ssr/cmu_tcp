@@ -16,7 +16,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
-
 #include "cmu_tcp.h"
 
 #define BUF_SIZE 10000
@@ -63,10 +62,10 @@ int main() {
   char *serverip;
   char *serverport;
   cmu_socket_t socket;
-
+  
   serverip = getenv("server15441");
   if (!serverip) {
-    serverip = "10.0.1.1";
+    serverip = "172.17.0.4";
   }
 
   serverport = getenv("serverport15441");
@@ -86,6 +85,8 @@ int main() {
   if (cmu_close(&socket) < 0) {
     exit(EXIT_FAILURE);
   }
+
+  printf("done\n");
 
   return EXIT_SUCCESS;
 }
