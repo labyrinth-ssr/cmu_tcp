@@ -44,24 +44,14 @@
  * @return 1 if the sequence number has been acknowledged, 0 otherwise.
  */
 int has_been_acked(cmu_socket_t *sock, uint32_t seq) {
-  // printf("    in_func: has_been_acked\n");
   int result;
   while (pthread_mutex_lock(&(sock->window.ack_lock)) != 0) {
   }
   result = after(sock->window.last_seq_acked, seq);
   pthread_mutex_unlock(&(sock->window.ack_lock));
-  // printf("    out_func: has_been_acked\n");
   return result;
 }
 void handshake_send(cmu_socket_t *sock, uint8_t *data, int buf_len, int flag);
-
-void msgSaveCopy(cmu_tcp_header_t* slot_msg,cmu_tcp_header_t* frame){
-  *slot_msg = *frame;
-}
-
-void msgDestroy (cmu_tcp_header_t* slot_msg){
-  bzero(slot_msg,sizeof(cmu_tcp_header_t));
-}
 
 int evSchedule(){
 }
@@ -126,7 +116,6 @@ void handle_message_sw(cmu_socket_t *sock, uint8_t *pkt) {
         return;
       }
       slot->msg=(uint8_t*)hdr;
-      // msgSaveCopy(&slot->msg,hdr);
       slot->received = true;
       if (seq==window->next_seq_expected) {
         while (slot->received) {
@@ -142,7 +131,6 @@ void handle_message_sw(cmu_socket_t *sock, uint8_t *pkt) {
           printf("read buf:%s\n",sock->received_buf);
           sock->received_len += payload_len;
           window->last_seq_read = seq+payload_len-1;
-          // msgDestroy(&slot->msg);
           slot->msg=NULL;
           slot->received=false;
           window->next_seq_expected = seq + payload_len;
@@ -234,7 +222,6 @@ bool check_for_data(cmu_socket_t *sock, cmu_read_mode_t flags) {
       n = recvfrom(sock->socket, pkt + buf_size, plen - buf_size, 0,
                    (struct sockaddr *)&(sock->conn), &conn_len);
       buf_size = buf_size + n;
-      // sock->window.last_seq_read= sock->window.last_seq_read +n;
     }
     handle_message_sw(sock, pkt);
     free(pkt);
@@ -298,15 +285,12 @@ void sw_send(cmu_socket_t *sock,uint8_t *data, int buf_len){
       int sockfd = sock->socket;
       slot=&window->sendQ[seq % get_advertised_window(frame)];
       slot->msg=(uint8_t*)frame;
-      // msgSaveCopy(&slot->msg, frame);
-      // TODO:set timeout and then?
+      // TODO:set timeout?
       slot->timeout= evSchedule();
       check_for_data(sock, TIMEOUT);
       send_header(frame);
       sock->payload_len_last_sent = payload_len;
       sendto(sockfd,frame, get_plen(frame), 0, (struct sockaddr *)&(sock->conn),conn_len);
-        // 什么时候检查ack？什么时候不发送？
-        // 不发送：一个packet大小就是MSS和data的最小值，
       data_offset += payload_len;
       window->last_seq_sent = seq;
       printf("in sw_sender: upd window.last_seq_sent:%d\n",seq);
@@ -478,7 +462,6 @@ void *begin_backend(void *in) {
     } else {
       pthread_mutex_unlock(&(sock->send_lock));
     }
-    // printf("in while recv\n");
     check_for_data(sock, NO_WAIT);
 
     
