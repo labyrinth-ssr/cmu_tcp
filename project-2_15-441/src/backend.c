@@ -76,6 +76,7 @@ void handle_message(cmu_socket_t *sock, uint8_t *pkt) {
       if (after(ack, sock->window.last_ack_received)) {
         sock->window.last_ack_received = ack;
         sock->adv_win_size = get_advertised_window(hdr);
+        sock->window.last_seq_read = get_seq(hdr);      
       }
       break;
     }
@@ -126,6 +127,7 @@ void handle_message(cmu_socket_t *sock, uint8_t *pkt) {
         sock->received_buf =
             realloc(sock->received_buf, sock->received_len + payload_len);
         memcpy(sock->received_buf + sock->received_len, payload, payload_len);
+        sock->window.last_seq_read = seq+payload_len-1;
         sock->received_len += payload_len;
       }
     }
@@ -167,6 +169,7 @@ void handle_message_sw(cmu_socket_t *sock, uint8_t *pkt) {
         msgDestroy(&slot->msg);
         // pthread_cond_signal(&window->sendWindowNotFull);
       }while (window->last_ack_received != get_ack(hdr));
+      window->last_seq_read = get_seq(hdr);      
     }
       break;
     }
@@ -200,7 +203,7 @@ void handle_message_sw(cmu_socket_t *sock, uint8_t *pkt) {
               realloc(sock->received_buf, sock->received_len + payload_len);
           memcpy(sock->received_buf + sock->received_len, payload, payload_len);
           sock->received_len += payload_len;
-          window->last_seq_read += payload_len;
+          window->last_seq_read = seq+payload_len-1;
           msgDestroy(&slot->msg);
           slot->received=false;
           window->next_seq_expected = seq + payload_len;
@@ -431,9 +434,6 @@ void sw_send(cmu_socket_t *sock,uint8_t *data, int buf_len){
   }
 }
 
-
-
-
 bool handle_handshake(cmu_socket_t*sock, uint8_t *data, int buf_len, uint8_t* pkt){
   cmu_tcp_header_t* hdr = (cmu_tcp_header_t*)pkt;
   read_header(hdr);
@@ -593,7 +593,7 @@ void *begin_backend(void *in) {
     } else {
       pthread_mutex_unlock(&(sock->send_lock));
     }
-    printf("in while recv\n");
+    // printf("in while recv\n");
     check_for_data(sock, NO_WAIT);
 
     

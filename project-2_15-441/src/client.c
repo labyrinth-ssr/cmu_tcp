@@ -78,5 +78,7 @@ int main() {
     exit(EXIT_FAILURE);
   }
 
+  printf("done\n");
+
   return EXIT_SUCCESS;
 }
