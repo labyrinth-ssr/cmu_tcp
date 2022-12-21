@@ -32,6 +32,8 @@ void functionality(cmu_socket_t *sock) {
 
   cmu_read(sock, buf, 200, NO_FLAG);
 
+  // int mss = MSS;
+
   cmu_write(sock, "hi there", 9);
   cmu_read(sock, buf, 200, NO_FLAG);
   printf("R: %s\n", buf);
@@ -57,7 +59,7 @@ int main() {
 
   serverip = getenv("server15441");
   if (!serverip) {
-    serverip = "172.17.0.4";
+    serverip = "172.17.0.3";
   }
 
   serverport = getenv("serverport15441");

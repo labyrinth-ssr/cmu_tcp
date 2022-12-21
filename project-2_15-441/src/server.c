@@ -50,6 +50,10 @@ void functionality(cmu_socket_t *sock) {
   n = cmu_read(sock, buf, BUF_SIZE, NO_FLAG);
   printf("N: %d\n", n);
 
+  for (int i=0; i<1000; i++) {
+  printf("%c",buf[i]);
+  }
+
   //write buf data to file.
   fp = fopen("/tmp/file.c", "w");
   fwrite(buf, 1, n, fp);
@@ -65,7 +69,7 @@ int main() {
   
   serverip = getenv("server15441");
   if (!serverip) {
-    serverip = "172.17.0.4";
+    serverip = "172.17.0.3";
   }
 
   serverport = getenv("serverport15441");

@@ -27,8 +27,8 @@
 #define EXIT_ERROR -1
 #define EXIT_FAILURE 1
 
-#define MAX_RCV_BUFFER 10
-#define MAX_SEND_BUFFER 10
+#define MAX_RCV_BUFFER 65535
+#define MAX_SEND_BUFFER 65535
 #define SWP_SEND_TIMEOUT 3000
 #define MAX_SEQ_NUM INT32_MAX
 
@@ -36,21 +36,21 @@ typedef uint32_t Seqno;
 typedef int Event;
 
 typedef struct {
-  Seqno last_ack_received; 
+  Seqno last_seq_acked; 
   Seqno last_seq_sent;
   pthread_cond_t sendWindowNotFull;
   pthread_mutex_t window_full_lock;
 
   struct sendQ_slot{
     Event timeout;
-    cmu_tcp_header_t msg;
+    uint8_t* msg;
   } sendQ[MAX_SEND_BUFFER];
  
   Seqno next_seq_expected; //下一个期望的序列号
   Seqno last_seq_read;
   struct recvQ_slot{
     bool received;
-    cmu_tcp_header_t msg;
+    uint8_t* msg;
   }recvQ[MAX_RCV_BUFFER]; //receive out of order
 
   pthread_mutex_t ack_lock;
@@ -87,6 +87,7 @@ typedef struct {
   pthread_mutex_t death_lock;
 
   uint16_t adv_win_size;
+  uint16_t payload_len_last_sent;
 
   window_t window;
 } cmu_socket_t;
