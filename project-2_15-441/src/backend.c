@@ -26,6 +26,7 @@
 #include <strings.h>
 #include <sys/socket.h>
 #include <sys/types.h>
+#include <unistd.h>
 
 #include "cmu_packet.h"
 #include "cmu_tcp.h"
@@ -239,6 +240,8 @@ bool check_for_data(cmu_socket_t *sock, cmu_read_mode_t flags) {
     free(pkt);
   }
   pthread_mutex_unlock(&(sock->recv_lock));
+    sleep(1);
+
   return time_out;
 }
 
