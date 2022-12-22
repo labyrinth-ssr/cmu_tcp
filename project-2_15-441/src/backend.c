@@ -127,7 +127,6 @@ void handle_message_sw(cmu_socket_t *sock, uint8_t *pkt) {
               realloc(sock->received_buf, sock->received_len + payload_len);
           memcpy(sock->received_buf + sock->received_len, payload, payload_len);
           printf("payload:%s\n",payload);
-
           printf("read buf:%s\n",sock->received_buf);
           sock->received_len += payload_len;
           window->last_seq_read = seq+payload_len-1;
@@ -266,7 +265,7 @@ void sw_send(cmu_socket_t *sock,uint8_t *data, int buf_len){
       if (effective_win_size < payload_len) {
           while (1) {
             if (has_been_acked(sock, window->last_seq_acked+1)) {
-              payload_len = MIN(effective_win_size, payload_len);
+              MIN(effective_win_size, payload_len);
               break;
             }
           }
@@ -283,7 +282,7 @@ void sw_send(cmu_socket_t *sock,uint8_t *data, int buf_len){
       window_t* window = &sock->window;
       size_t conn_len = sizeof(sock->conn);
       int sockfd = sock->socket;
-      slot=&window->sendQ[seq % get_advertised_window(frame)];
+      slot=&window->sendQ[seq % sock->adv_win_size];
       slot->msg=(uint8_t*)frame;
       // TODO:set timeout?
       slot->timeout= evSchedule();
