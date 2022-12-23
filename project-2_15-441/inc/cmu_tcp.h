@@ -19,6 +19,7 @@
 #include <stdint.h>
 #include <sys/socket.h>
 #include <sys/types.h>
+#include <sys/time.h>
 
 #include "cmu_packet.h"
 #include "grading.h"
@@ -33,7 +34,6 @@
 #define MAX_SEQ_NUM INT32_MAX
 
 typedef uint32_t Seqno;
-typedef int Event;
 
 typedef struct {
   Seqno last_seq_acked; 
@@ -42,7 +42,6 @@ typedef struct {
   pthread_mutex_t window_full_lock;
 
   struct sendQ_slot{
-    Event timeout;
     uint8_t* msg;
   } sendQ[MAX_SEND_BUFFER];
  
@@ -52,7 +51,8 @@ typedef struct {
     bool received;
     uint8_t* msg;
   }recvQ[MAX_RCV_BUFFER]; //receive out of order
-
+  struct timeval send_time;
+  int ack_num;
   pthread_mutex_t ack_lock;
 } window_t;
 
