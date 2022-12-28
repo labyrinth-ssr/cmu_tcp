@@ -38,10 +38,12 @@ typedef uint32_t Seqno;
 typedef struct {
   Seqno last_seq_acked; 
   Seqno last_seq_sent;
+
   pthread_cond_t sendWindowNotFull;
   pthread_mutex_t window_full_lock;
 
   struct sendQ_slot{
+    struct timeval send_time;
     uint8_t* msg;
   } sendQ[MAX_SEND_BUFFER];
  
@@ -52,10 +54,13 @@ typedef struct {
     bool received;
     uint8_t* msg;
   }recvQ[MAX_RCV_BUFFER]; //receive out of order
-  
-  struct timeval send_time;
+  uint8_t recv_buffer_num;
+
   int ack_num;
   pthread_mutex_t ack_lock;
+  
+  uint8_t rtt;
+
 } window_t;
 
 /**
@@ -76,15 +81,18 @@ typedef struct {
   pthread_t thread_id;
   uint16_t my_port;
   struct sockaddr_in conn;
+
   uint8_t* received_buf;
   int received_len;
   pthread_mutex_t recv_lock;
+
   pthread_cond_t wait_cond;
 
   uint8_t* sending_buf;
   int sending_len;
   cmu_socket_type_t type;
   pthread_mutex_t send_lock;
+
   int dying;
   pthread_mutex_t death_lock;
 
