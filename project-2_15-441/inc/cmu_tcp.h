@@ -47,10 +47,12 @@ typedef struct {
  
   Seqno next_seq_expected; //下一个期望的序列号
   Seqno last_seq_read;
+
   struct recvQ_slot{
     bool received;
     uint8_t* msg;
   }recvQ[MAX_RCV_BUFFER]; //receive out of order
+  
   struct timeval send_time;
   int ack_num;
   pthread_mutex_t ack_lock;

@@ -73,8 +73,7 @@ void handle_message_sw(cmu_socket_t *sock, uint8_t *pkt) {
 
   switch (flags) {
     case ACK_FLAG_MASK: {
-      if (between(get_ack(hdr), window->last_seq_acked + 1,
-                  window->last_seq_sent + sock->payload_len_last_sent)) {
+      if (between(get_ack(hdr), window->last_seq_acked + 1, window->last_seq_sent + sock->payload_len_last_sent)) {
         while (window->last_seq_acked + 1 < get_ack(hdr)) {
           //update：此处修改成了跳格子的逻辑，每次向后跳跃一个包裹负载的长度。
           struct sendQ_slot *slot;
@@ -82,15 +81,16 @@ void handle_message_sw(cmu_socket_t *sock, uint8_t *pkt) {
           window->last_seq_acked += get_payload_len(slot->msg);
           slot->msg = NULL;
         }
+      }
         // 如果当前还有没收到确认的报文段，则重启计时器。
-        if(window->last_seq_acked + 1<window->last_seq_sent + sock->payload_len_last_sent)
-          set_timer(sock);
+      if(window->last_seq_acked + 1 < window->last_seq_sent + sock->payload_len_last_sent){
+        set_timer(sock);
         sock->adv_win_size = get_advertised_window(hdr);
         printf("recver told sender adv_win_size:%d\n", sock->adv_win_size);
       } else {
         printf("ack out of win range:ack:%d,min:%d,max:%d", get_ack(hdr),
-               window->last_seq_acked + 1,
-               window->last_seq_sent + sock->payload_len_last_sent);
+        window->last_seq_acked + 1,
+        window->last_seq_sent + sock->payload_len_last_sent);
       }
       break;
     }
@@ -192,12 +192,9 @@ bool check_for_data(cmu_socket_t *sock, cmu_read_mode_t flags) {
   }
   switch (flags) {
     case NO_FLAG:
-      len = recvfrom(sock->socket, &hdr, sizeof(cmu_tcp_header_t), MSG_PEEK,
-                     (struct sockaddr *)&(sock->conn), &conn_len);
+      len = recvfrom(sock->socket, &hdr, sizeof(cmu_tcp_header_t), MSG_PEEK, (struct sockaddr *)&(sock->conn), &conn_len);
       break;
     case TIMEOUT: {
-      //只判断有没有超时。删去了原本的poll逻辑（会造成等着的时候没法发东西）。
-      //TODO: RTT estimation/ dynamic time interval
       struct timeval current_time;
       gettimeofday(&current_time, NULL);
       if (current_time.tv_sec - sock->window.send_time.tv_sec >3) 
@@ -206,8 +203,7 @@ bool check_for_data(cmu_socket_t *sock, cmu_read_mode_t flags) {
     }
     // Fallthrough.
     case NO_WAIT:
-      len = recvfrom(sock->socket, &hdr, sizeof(cmu_tcp_header_t),
-            MSG_DONTWAIT | MSG_PEEK, (struct sockaddr *)&(sock->conn),&conn_len);
+      len = recvfrom(sock->socket, &hdr, sizeof(cmu_tcp_header_t), MSG_DONTWAIT | MSG_PEEK, (struct sockaddr *)&(sock->conn),&conn_len);
       break;
     default:
       perror("ERROR unknown flag");
@@ -217,8 +213,7 @@ bool check_for_data(cmu_socket_t *sock, cmu_read_mode_t flags) {
     plen = get_plen(&hdr);
     pkt = malloc(plen);
     while (buf_size < plen) {
-      n = recvfrom(sock->socket, pkt + buf_size, plen - buf_size, 0,
-                   (struct sockaddr *)&(sock->conn), &conn_len);
+      n = recvfrom(sock->socket, pkt + buf_size, plen - buf_size, 0, (struct sockaddr *)&(sock->conn), &conn_len);
       buf_size = buf_size + n;
     }
     handle_message_sw(sock, pkt);
@@ -229,6 +224,7 @@ bool check_for_data(cmu_socket_t *sock, cmu_read_mode_t flags) {
 
   return time_out;
 }
+
 void set_timer(cmu_socket_t *sock) {//以窗口为单位确定超时情况。
   gettimeofday(&sock->window.send_time, NULL);
   timer_on = true;
@@ -260,8 +256,7 @@ void sw_send(cmu_socket_t *sock, uint8_t *data, int buf_len) {
   uint32_t ack = sock->window.next_seq_expected;
   while (buf_len != 0) {  // 在buf未发送完毕时，反复发送。
     // 1. 计算可用发送窗口
-    printf("in sender:adv_win_size:%d,last_seq_sent:%d,last_seq_acked:%d\n",
-           sock->adv_win_size, window->last_seq_sent, window->last_seq_acked);
+    printf("in sender:adv_win_size:%d,last_seq_sent:%d,last_seq_acked:%d\n", sock->adv_win_size, window->last_seq_sent, window->last_seq_acked);
     uint16_t effective_win_size = sock->adv_win_size - (window->last_seq_sent - window->last_seq_acked);
     // 2. 计算接下来可发出的新包裹大小
     uint16_t payload_len = MIN((uint16_t)buf_len, (uint16_t)MSS);
@@ -276,33 +271,37 @@ void sw_send(cmu_socket_t *sock, uint8_t *data, int buf_len) {
     uint8_t *payload = data_offset;
     buf_len -= payload_len;  // 接下来将要发出payload_len长度的内容。
   
+    msg = create_packet(src, dst, seq, ack, hlen, plen, flags, adv_window,
+                        ext_len, ext_data, payload, payload_len);
+    if (!timer_on) set_timer(sock);
+    cmu_tcp_header_t *frame = (cmu_tcp_header_t *)msg;
+    slot = &window->sendQ[seq % sock->adv_win_size];
+    slot->msg = msg;
+    send_header(frame);
+    sock->payload_len_last_sent = payload_len;
+    sendto(sockfd, msg, get_plen(msg), 0, (struct sockaddr *)&(sock->conn), conn_len);
+    data_offset += payload_len;
+    window->last_seq_sent = seq;
+    printf("in sw_sender: upd window.last_seq_sent:%d\n", seq);
+    seq += payload_len;
+  }
+}
+
+
+void timeout_resend(cmu_socket_t *sock){
+    struct sendQ_slot *slot;
+    window_t *window = &sock->window;
+    uint8_t *msg;
+    int sockfd = sock->socket;
+    size_t conn_len = sizeof(sock->conn);
     if (check_for_data(sock, TIMEOUT)) {//判断是否超时。
-      //如果处于重传阶段，在这里就不执行创建新包裹操作，而是重传最小序号未应答报文段。
-      slot = &window->sendQ[(sock->window.last_seq_acked + 1) % sock->adv_win_size];
+      slot = &window->sendQ[(sock->window.last_seq_acked + 1) % sock->adv_win_size]; //! 重发报文？
       cmu_tcp_header_t *frame = (cmu_tcp_header_t *)slot->msg;
       msg=slot->msg;
-      //原本打算在这里讨论要重发的包和可用窗口大小的关系，决定要不要截断重发的包裹的。
-      //大致思路是，如果要重发的包大于可用窗口大小，就将其截断并重新存入发送缓存，并发送前半段。
-      //截断和截断后的重传太复杂了所以作罢。
       set_timer(sock);
       send_header(frame);
       sendto(sockfd, msg, get_plen(msg), 0, (struct sockaddr *)&(sock->conn), conn_len);
-    } else {// 如果不在重传阶段，就正常发送新包裹。
-      msg = create_packet(src, dst, seq, ack, hlen, plen, flags, adv_window,
-                          ext_len, ext_data, payload, payload_len);
-      if (!timer_on) set_timer(sock);
-      cmu_tcp_header_t *frame = (cmu_tcp_header_t *)msg;
-      slot = &window->sendQ[seq % sock->adv_win_size];
-      slot->msg = msg;
-      send_header(frame);
-      sock->payload_len_last_sent = payload_len;
-      sendto(sockfd, msg, get_plen(msg), 0, (struct sockaddr *)&(sock->conn), conn_len);
-      data_offset += payload_len;
-      window->last_seq_sent = seq;
-      printf("in sw_sender: upd window.last_seq_sent:%d\n", seq);
-      seq += payload_len;
     }
-  }
 }
 
 bool handle_handshake(cmu_socket_t *sock, uint8_t *data, int buf_len,
