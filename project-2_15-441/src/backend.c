@@ -33,6 +33,7 @@
 #include "cmu_tcp.h"
 
 #define MIN(X, Y) (((X) < (Y)) ? (X) : (Y))
+#define MIN3(A,B,C) ((A)>(B)?(B):(A))>C?C:((A)>(B)?(B):(A))
 bool timer_on = false;
 #define RTT_RATE 0.5
 // int last_advertised_window=MAX_RCV_BUFFER;
@@ -49,11 +50,94 @@ int has_been_acked(cmu_socket_t *sock, uint32_t seq) {
   int result;
   while (pthread_mutex_lock(&(sock->window.ack_lock)) != 0) {
   }
-  result = after(sock->window.last_seq_acked, seq);
+  result = after(sock->window.last_acked_recv, seq);
   pthread_mutex_unlock(&(sock->window.ack_lock));
   return result;
 }
 void handshake_send(cmu_socket_t *sock, uint8_t *data, int buf_len, int flag);
+
+
+int deliver_data(cmu_socket_t *sock, char *pkt){
+    if(sock->received_buf == NULL){
+        sock->received_buf = malloc(get_payload_len(pkt));
+    }
+    else{
+        sock->received_buf = realloc(sock->received_buf, sock->received_len + get_payload_len(pkt));
+    }
+    /* 将packet的数据拷贝到socket的结构中去 */
+    memcpy(sock->received_buf + sock->received_len, get_payload(pkt), get_payload_len(pkt));
+    sock->received_len += get_payload_len(pkt);
+    return MAX_RCV_BUFFER - sock->received_len;
+}
+
+
+void insert_pkt_into_list(recv_slot *header, char *pkt){
+    recv_slot *cur = header;
+    recv_slot *prev;
+    recv_slot *slot = (recv_slot *)malloc(sizeof(recv_slot));
+    int myseq = get_seq(pkt);
+    uint8_t* p = (uint8_t)malloc(get_plen(pkt));
+    memcpy(p, pkt, get_plen(pkt));
+    slot->msg = p;
+    while(1){
+        if(cur->next == NULL){
+            cur->next = slot;
+            slot->next = NULL;
+            break;
+        }
+        prev = cur;
+        cur = cur->next;
+        int seq = get_seq(cur->msg);
+        /* h,1,3,6,8,12   <----   5 */
+        if(myseq > seq){
+            continue;
+        }
+        else{
+            slot->next = cur;
+            prev->next = slot;
+            break;
+        }
+    }
+    return;
+    
+}
+
+uint32_t get_time_gap(send_slot* slot){
+    struct timeval now;
+    struct timeval gap;
+    gettimeofday(&now, NULL);
+    if ((now.tv_usec - slot->timeout.tv_usec)<0) {
+      gap.tv_sec = now.tv_sec - slot->timeout.tv_sec - 1;
+      gap.tv_usec = 1000000 + now.tv_usec - slot->timeout.tv_usec;
+    }
+    else {
+      gap.tv_sec = now.tv_sec - slot->timeout.tv_sec;
+      gap.tv_usec = now.tv_usec - slot->timeout.tv_usec;
+    }
+    return 1000000 * gap.tv_sec + gap.tv_usec;
+}
+
+void update_rtt(window_t* window, send_slot* slot) {
+    uint32_t time_gap = get_time_gap(slot);
+    window->RTT = (uint32_t)((window->RTT)*0.875 + time_gap*0.125);//更新RTT
+    window->DevRTT = (uint32_t)((window->DevRTT)*0.75 + (abs(time_gap - window->RTT))*0.25);//更新DevRTT
+    window->RTO = (window->RTT) + (window->DevRTT) * 4;//更新RTO
+}
+
+
+void check_timeout(cmu_socket_t *sock){
+    window_t* window = &sock->window;
+    send_slot* ss = &window->send_header;
+    send_slot* next = NULL;
+    uint32_t rto = window->RTO;
+    while((next = ss->next)!=NULL){
+      ss->next = next->next;
+      if(get_time_gap(next) > rto){
+        sendto(sock->socket, next->msg, get_plen(next->msg), 0, (struct sockaddr *)&(sock->conn), sizeof(sock->conn));
+        gettimeofday(&next->timeout, NULL);
+      }
+    }
+}
 
 /**
  *
@@ -71,35 +155,29 @@ void handle_message_sw(cmu_socket_t *sock, uint8_t *pkt) {
   window_t *window = &sock->window;
   read_header(hdr);
   uint8_t flags = get_flags(hdr);
-
+  uint32_t ack = get_ack(pkt);
+  uint32_t seq = get_ack(pkt);
   switch (flags) {
     case ACK_FLAG_MASK: {
-      if (between(get_ack(hdr), window->last_seq_acked + 1, window->last_seq_sent + sock->payload_len_last_sent)) {
-        struct sendQ_slot *slot;
-        struct timeval recv_time;
-        gettimeofday(&recv_time, NULL);
-        sock->adv_win_size = get_advertised_window(hdr);
-        while (get_ack(hdr) > window->last_seq_acked + 1) {
-          slot = &window->sendQ[window->last_seq_acked % get_advertised_window(hdr)]; //! get_advertised_window(hdr)
-          
-          window->ack_num = 0;
-          window->last_seq_acked += get_payload_len(slot->msg);
-          uint8_t rtt = recv_time.tv_usec - slot->send_time.tv_usec;
-          window->rtt = RTT_RATE*window->rtt + (1-RTT_RATE)*rtt;
-
-          free(slot->msg);
-          slot->send_time.tv_sec=-1;
-          slot->msg = NULL;
+      if(ack > window->last_acked_recv){
+        window->ack_num = 0;
+        window->last_acked_recv = ack;
+        send_slot* ss = &window->send_header;
+        send_slot* next = NULL;
+        while((next = ss->next)!=NULL && get_seq(next->msg) < ack){
+          if(next == window->send_header.next) update_rtt(window, next);
+          ss->next = next->next;
+          window->send_length -= (get_payload_len(next->msg));
+          free(next->msg);
+          free(next);
         }
-
+      }else if(ack == window->last_acked_recv){
         window->ack_num++;
-        
-        // three redundant ack
         if(window->ack_num == 3){
-          slot = &window->sendQ[window->last_seq_acked % get_advertised_window(hdr)];
-          cmu_tcp_header_t* hdr = (cmu_tcp_header_t *)slot->msg;
-          sendto(sock->socket, slot->msg, get_plen(hdr), 0, (struct sockaddr *)&(sock->conn), sizeof(sock->conn));
-          set_timer(slot);
+          send_slot* ss = &window->send_header;
+          send_slot* next = ss->next;
+          sendto(sock->socket, next->msg, get_plen(next->msg), 0, (struct sockaddr *)&(sock->conn), sizeof(sock->conn));
+          window->ack_num = 0;
         }
       }
       break;
@@ -109,58 +187,46 @@ void handle_message_sw(cmu_socket_t *sock, uint8_t *pkt) {
       if (get_hlen(hdr) != get_plen(hdr)) break;
       sock->window.last_seq_read = get_seq(hdr);
       sock->window.next_seq_expected = get_seq(hdr) + 1;
-      sock->adv_win_size = get_advertised_window(hdr);
-      printf("recver told sender adv_win_size:%d\n", sock->adv_win_size);
+      window->adv_win_size = get_advertised_window(hdr);
+      printf("recver told sender adv_win_size:%d\n", window->adv_win_size);
       handshake_send(sock, NULL, 0, (SYN_FLAG_MASK | ACK_FLAG_MASK));
       break;
     }
 
     default: {
-
-      printf("window->next_seq_expected:%d,window->last_seq_read:%d\n", window->next_seq_expected, window->last_seq_read);
-
       uint32_t seq = get_seq(hdr);
-      uint16_t rcv_win_size = MAX_RCV_BUFFER - window->recv_buffer_num;
-      printf("rcv data: rcv_win_size: %d\n", rcv_win_size);
-
-      if (!between(seq, window->next_seq_expected, window->next_seq_expected + get_advertised_window(hdr) - 1)) {//! 这里的 get_advertised_window(hdr) 是错的
-        return;
-      }
-
-      struct recvQ_slot *slot = &window->recvQ[seq % rcv_win_size];
-      printf("fill rcv slot:%d\n", seq % rcv_win_size);
-
-      uint8_t *pkt_ = malloc(get_plen(&hdr));
-      memcpy(pkt_, pkt, get_plen(&hdr));
-      slot->msg = (uint8_t *)pkt_;
-      slot->received = true;
 
       if (seq == window->next_seq_expected) {
-        
-        while (slot->received) {
-          uint8_t *pkt = slot->msg;
-          uint16_t payload_len = get_payload_len(pkt);
           
+        uint32_t received_num = 0;
+      
+        window->last_seq_read = seq;
+        window->next_seq_expected = (seq + get_payload_len(pkt))%MAX_RCV_BUFFER;
+        
+
+        uint32_t adv_win = deliver_data(sock, pkt);
+
+        recv_slot* slot = window->recv_header.next;
+        recv_slot* prev = &window->recv_header;
+        while(slot != NULL && (window->next_seq_expected == get_seq(slot->msg))){
           // Make sure there is enough space in the buffer to store the payload.
-          sock->received_buf = realloc(sock->received_buf, sock->received_len + payload_len);
-          memcpy(sock->received_buf + sock->received_len, get_payload(pkt), payload_len);
-          sock->received_len += payload_len;
-          
-          window->last_seq_read = seq + payload_len - 1;
-
+          deliver_data(sock, slot->msg);
+          window->last_seq_read = get_seq(slot->msg);
+          window->next_seq_expected = (window->next_seq_expected + get_payload_len(pkt)) % MAX_RCV_BUFFER;
+          prev->next = slot->next;
           free(slot->msg);
-          slot->msg = NULL;
-          slot->received = false;
-          window->next_seq_expected = window->last_seq_read + 1;
-          slot = &window->recvQ[window->next_seq_expected % rcv_win_size];
-
+          free(slot);
+          slot = prev->next;
         }
-
+      }else{
+        insert_pkt_into_list(&window->recv_header, pkt);
       }
-        
+
+
+      window->this_window_size = MAX_RCV_BUFFER - sock->received_len;
 
       socklen_t conn_len = sizeof(sock->conn);
-      seq = window->last_seq_acked + 1;
+      seq = window->last_acked_recv;
       // No payload.
       uint8_t *payload = NULL;
       uint16_t payload_len = 0;
@@ -173,13 +239,12 @@ void handle_message_sw(cmu_socket_t *sock, uint8_t *pkt) {
       uint16_t hlen = sizeof(cmu_tcp_header_t);
       uint16_t plen = hlen + payload_len;
       uint8_t flags = ACK_FLAG_MASK;
-      uint16_t adv_window = rcv_win_size;//! check
+      uint16_t adv_window = window->this_window_size;
       printf("rcver send adv_win_size:%d\n", adv_window);
-      
       uint8_t *response_packet = create_packet(src, dst, seq, ack, hlen, plen, flags, adv_window, ext_len, ext_data, payload, payload_len);
       send_header((cmu_tcp_header_t *)response_packet);
       sendto(sock->socket, response_packet, plen, 0, (struct sockaddr *)&(sock->conn), conn_len);
-      window->last_seq_sent = seq;
+      window->last_byte_send = seq;
       free(response_packet);
     }
   }
@@ -245,11 +310,6 @@ bool check_for_data(cmu_socket_t *sock, cmu_read_mode_t flags) {
   return time_out;
 }
 
-void set_timer(struct sendQ_slot *slot) {//以窗口为单位确定超时情况。
-  gettimeofday(&slot->send_time, NULL);
-  timer_on = true;
-}
-
 /**
  * Breaks up the data into packets and sends a single packet at a time.
  * You should most certainly update this function in your implementation.
@@ -264,7 +324,7 @@ void sw_send(cmu_socket_t *sock, uint8_t *data, int buf_len) {
   uint8_t *data_offset = data;
   size_t conn_len = sizeof(sock->conn);
   window_t *window = &sock->window;
-  uint32_t seq = sock->window.last_seq_acked + 1;
+  uint32_t seq = sock->window.last_acked_recv;
   uint16_t src = sock->my_port;
   uint16_t dst = ntohs(sock->conn.sin_port);
   uint16_t adv_window = 1;  // no usage
@@ -275,56 +335,45 @@ void sw_send(cmu_socket_t *sock, uint8_t *data, int buf_len) {
   int sockfd = sock->socket;
   uint32_t ack = sock->window.next_seq_expected;
   while (buf_len != 0) {
-    printf("in sender:adv_win_size:%d,last_seq_sent:%d,last_seq_acked:%d\n", sock->adv_win_size, window->last_seq_sent, window->last_seq_acked);
-    uint16_t effective_win_size = sock->adv_win_size - (window->last_seq_sent - window->last_seq_acked);
-    printf("effectiv_win_size:%d\n", effective_win_size);
+    printf("in sender:adv_win_size:%d, last_seq_sent:%d, last_acked_recv:%d\n", window->adv_win_size, window->last_acked_recv, window->last_seq_acked);
     
-    uint16_t payload_len = MIN((uint16_t)buf_len, (uint16_t)MSS);
-    if (effective_win_size < payload_len) {
-      while (!has_been_acked(sock, window->last_seq_acked + 1)) ;
-      payload_len = MIN(effective_win_size, payload_len);
-    }
+    //uint16_t effective_win_size = sock->adv_win_size - (window->last_seq_sent - window->last_seq_acked);
+    uint32_t send_len = MIN3(window->adv_win_size, MAX_LEN, buf_len);
 
-    struct sendQ_slot *slot;
-    uint16_t plen = hlen + payload_len;
+    if(send_len <= 0) send_len = 1;
+
+    uint16_t plen = hlen + send_len;
     uint8_t *payload = data_offset;
-    buf_len -= payload_len;
+    buf_len -= send_len;
   
-    msg = create_packet(src, dst, seq, ack, hlen, plen, flags, adv_window, ext_len, ext_data, payload, payload_len);
-    if (!timer_on) set_timer(sock);
-    cmu_tcp_header_t *frame = (cmu_tcp_header_t *)msg;
-
-    slot = &window->sendQ[seq % sock->adv_win_size];
-    slot->msg = msg;
-    send_header(frame);
-    
-    sock->payload_len_last_sent = payload_len;
+    msg = create_packet(src, dst, seq, ack, hlen, plen, flags, adv_window, ext_len, ext_data, payload, send_len);
     sendto(sockfd, msg, get_plen(msg), 0, (struct sockaddr *)&(sock->conn), conn_len);
-    data_offset += payload_len;
-    window->last_seq_sent = seq;
-    printf("in sw_sender: upd window.last_seq_sent:%d\n", seq);
-    seq += payload_len;
+    send_header(msg);
+
+    send_slot *slot = malloc(sizeof(send_slot));
+    window->last_byte_send += send_len;
+
+    struct timeval send_time;
+    gettimeofday(&send_time, NULL);
+    slot->msg = msg;
+    slot->timeout = send_time;
+
+    send_slot* ss = &window->send_header;
+    send_slot* next = NULL;
+    while((next = ss->next)!=NULL){
+      ss = next;
+    }
+    ss->next = slot;
+    slot->next = NULL;
+    
+    if(window->adv_win_size > 0) window->adv_win_size -= send_len;
+    data_offset += send_len;    
+    seq += send_len;
+
+    check_for_data(sock, NO_WAIT);//!!!检查并更新window
   }
 }
 
-
-void timeout_resend(cmu_socket_t *sock){
-    struct timeval current_time;
-    gettimeofday(&current_time, NULL);
-    if (current_time.tv_sec - sock->window.send_time.tv_sec >3) {//! 这里有问题，应该是RTT
-      struct sendQ_slot *slot;
-      window_t *window = &sock->window;
-      uint8_t *msg;
-      int sockfd = sock->socket;
-      size_t conn_len = sizeof(sock->conn);
-      slot = &window->sendQ[(sock->window.last_seq_acked + 1) % sock->adv_win_size]; //! 重发报文？
-      cmu_tcp_header_t *frame = (cmu_tcp_header_t *)slot->msg;
-      msg = slot->msg;
-      set_timer(sock);
-      send_header(frame);
-      sendto(sockfd, msg, get_plen(msg), 0, (struct sockaddr *)&(sock->conn), conn_len);
-    }
-}
 
 bool handle_handshake(cmu_socket_t *sock, uint8_t *data, int buf_len,
                       uint8_t *pkt) {
@@ -335,16 +384,16 @@ bool handle_handshake(cmu_socket_t *sock, uint8_t *data, int buf_len,
   bool this_flag = true;
   switch (flag) {
     case (SYN_FLAG_MASK | ACK_FLAG_MASK): {
-      printf("ack:%d,last_seq_acked:%d\n", get_ack(hdr), sock->window.last_seq_acked);
+      printf("ack:%d,last_acked_recv:%d\n", get_ack(hdr), sock->window.last_acked_recv);
       if (get_hlen(hdr) != get_plen(hdr)) {
         this_flag = false;
         break;
       }
-      if (get_ack(hdr) != sock->window.last_seq_acked + 2) {
+      if (get_ack(hdr) != sock->window.last_acked_recv + 1) {
         this_flag = false;
         break;
       }
-      sock->window.last_seq_acked = get_ack(hdr) - 1;
+      sock->window.last_acked_recv = get_ack(hdr);
       sock->window.last_seq_read = get_seq(hdr);
       sock->window.next_seq_expected = get_seq(hdr) + 1;
       handshake_send(sock, data, buf_len, ACK_FLAG_MASK);
@@ -355,13 +404,13 @@ bool handle_handshake(cmu_socket_t *sock, uint8_t *data, int buf_len,
     // should also handle it when in initiator.
     case ACK_FLAG_MASK: {
       if (sock->type == TCP_LISTENER &&
-          get_ack(hdr) != sock->window.last_seq_acked + 2) {
+          get_ack(hdr) != sock->window.last_acked_recv + 1) {
         this_flag = false;
         break;
       }
       if (sock->type == TCP_LISTENER) {
         set_flags(hdr, 0);
-        sock->window.last_seq_acked = get_ack(hdr) - 1;
+        sock->window.last_acked_recv = get_ack(hdr);
       }
       handle_message_sw(sock, pkt);
       break;
@@ -420,7 +469,7 @@ void handshake_send(cmu_socket_t *sock, uint8_t *data, int b_len, int flag) {
   int sockfd = sock->socket;
   uint16_t src = sock->my_port;
   uint16_t dst = ntohs(sock->conn.sin_port);
-  uint32_t seq = sock->window.last_seq_acked + 1;
+  uint32_t seq = sock->window.last_acked_recv;
   uint32_t ack = sock->window.next_seq_expected;
   uint16_t hlen = sizeof(cmu_tcp_header_t);
   uint16_t adv_window = MAX_RCV_BUFFER;
@@ -485,6 +534,7 @@ void *begin_backend(void *in) {
     if (death && buf_len == 0) {
       break;
     }
+    check_timeout(sock);
 
     if (buf_len > 0) {
       data = malloc(buf_len);

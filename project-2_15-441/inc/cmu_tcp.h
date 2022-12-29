@@ -35,31 +35,40 @@
 
 typedef uint32_t Seqno;
 
-typedef struct {
-  Seqno last_seq_acked; 
-  Seqno last_seq_sent;
+typedef struct recv_slot{
+  bool received;
+  uint8_t* msg;
+  struct recv_slot* next;
+} recv_slot;
 
-  pthread_cond_t sendWindowNotFull;
-  pthread_mutex_t window_full_lock;
+typedef struct send_slot{
+  struct timeval timeout;
+  uint8_t* msg;
+  struct send_slot* next;
+} send_slot;
 
-  struct sendQ_slot{
-    struct timeval send_time;
-    uint8_t* msg;
-  } sendQ[MAX_SEND_BUFFER];
+typedef struct window_t{
+
+  uint32_t adv_win_size;
+  uint32_t this_window_size;
+
+  Seqno last_acked_recv;
+  uint32_t last_byte_send;
+  uint32_t ack_num;
+  send_slot send_header;
+  uint32_t send_length;
  
-  Seqno next_seq_expected; //下一个期望的序列号
+
   Seqno last_seq_read;
+  Seqno next_seq_expected; //下一个期望的序列号
+  recv_slot recv_header;
+  
 
-  struct recvQ_slot{
-    bool received;
-    uint8_t* msg;
-  }recvQ[MAX_RCV_BUFFER]; //receive out of order
-  uint8_t recv_buffer_num;
-
-  int ack_num;
   pthread_mutex_t ack_lock;
   
-  uint8_t rtt;
+  uint32_t RTT;
+  uint32_t DevRTT;
+  uint32_t RTO;
 
 } window_t;
 
@@ -96,8 +105,6 @@ typedef struct {
   int dying;
   pthread_mutex_t death_lock;
 
-  uint16_t adv_win_size;
-  uint16_t payload_len_last_sent;
 
   window_t window;
 } cmu_socket_t;
