@@ -121,6 +121,7 @@ def test_run_server_client():
                 hide=True,
             )
         except Exception:
+            print("error1")
             failed = True
 
         try:
@@ -128,6 +129,7 @@ def test_run_server_client():
             print("stop client")
             client_conn.run(stop_client_cmd, hide=True)
         except Exception:
+            print("error2")
             # Ignore error here that may occur if client already shut down.
             pass
         try:
@@ -135,6 +137,7 @@ def test_run_server_client():
             print("stop server")
             server_conn.local(stop_server_cmd, hide=True)
         except Exception:
+            print("error3")
             # Ignore error here that may occur if server already shut down.
             pass
         if failed:

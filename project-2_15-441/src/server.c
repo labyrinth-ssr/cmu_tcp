@@ -18,7 +18,7 @@
 #include <unistd.h>
 #include "cmu_tcp.h"
 
-#define BUF_SIZE 10000
+#define BUF_SIZE 1000000
 
 /*
  * Param: sock - used for reading and writing to a connection
@@ -45,12 +45,13 @@ void functionality(cmu_socket_t *sock) {
   //write the url.
   cmu_write(sock, "https://www.youtube.com/watch?v=dQw4w9WgXcQ", 44);
 
-  sleep(1);
+  sleep(3);
   //read again
   n = cmu_read(sock, buf, BUF_SIZE, NO_FLAG);
   printf("N: %d\n", n);
 
   for (int i=0; i<1000; i++) {
+  //for (int i=0; i<n; i++) {
   printf("%c",buf[i]);
   }
 

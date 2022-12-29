@@ -59,7 +59,7 @@ int cmu_socket(cmu_socket_t *sock, const cmu_socket_type_t socket_type,
     srand((unsigned)time(NULL));
   }
 
-  sock->window.last_acked_recv = (uint32_t)rand();
+  sock->window.last_acked_recv = (uint32_t)rand()%10000;
   printf("socket type:%d,ini seq:%d",socket_type,sock->window.last_acked_recv);
   sock->window.next_seq_expected = 0;
   pthread_mutex_init(&(sock->window.ack_lock), NULL);

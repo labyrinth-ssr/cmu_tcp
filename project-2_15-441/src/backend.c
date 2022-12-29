@@ -504,6 +504,8 @@ void handshake_send(cmu_socket_t *sock, uint8_t *data, int b_len, int flag) {
     sendto(sockfd, msg, plen, 0, (struct sockaddr *)&(sock->conn), conn_len);
     if (handle_handshake(sock, data, b_len, wait_check(sock))) {
       break;
+    }else if(flag == SYN_FLAG_MASK || flag == (SYN_FLAG_MASK|ACK_FLAG_MASK)){
+      break;
     }
   }
   if (data_offset != NULL && (buf_len - payload_len) > 0)

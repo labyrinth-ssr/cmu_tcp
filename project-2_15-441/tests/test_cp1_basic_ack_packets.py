@@ -47,8 +47,11 @@ def test_basic_ack_packets():
                     udp /
                     CMUTCP(plen=25, seq_num=1000, flags=SYN_MASK)
                 )
+                print("IFNAME:"+IFNAME)
                 syn_ack_pkt = sr1(syn_pkt, timeout=TIMEOUT, iface=IFNAME)
-
+                if(syn_ack_pkt is None): print("err1")
+                if(syn_ack_pkt[CMUTCP].flags != SYN_MASK | ACK_MASK): print("err2"+" "+ syn_ack_pkt[CMUTCP].flags)
+                if(syn_ack_pkt[CMUTCP].ack_num != 1000 + 1): print("err3"+" "+syn_ack_pkt[CMUTCP].ack_num)
                 if (
                     syn_ack_pkt is None
                     or syn_ack_pkt[CMUTCP].flags != SYN_MASK | ACK_MASK
@@ -56,7 +59,7 @@ def test_basic_ack_packets():
                 ):
                     print(
                         "Listener (server) did not properly respond to SYN "
-                        "packet."
+                        "packet.1"
                     )
                     print("Test Failed")
                     conn.run(STOP_TESTING_SERVER_CMD)
@@ -77,7 +80,7 @@ def test_basic_ack_packets():
                 empty_pkt = sr1(ack_pkt, timeout=0.5, iface=IFNAME)
 
                 if empty_pkt is not None:
-                    print("Listener (server) should not respond to ack pkt.")
+                    print("Listener (server) should not respond to ack pkt.2")
                     print("Test Failed")
                     conn.run(STOP_TESTING_SERVER_CMD)
                     return
@@ -103,7 +106,7 @@ def test_basic_ack_packets():
                 ):
                     print(
                         "Listener (server) did not properly respond to data "
-                        "packet."
+                        "packet.3"
                     )
                     print("Test Failed")
                     conn.run(STOP_TESTING_SERVER_CMD)
