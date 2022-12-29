@@ -48,9 +48,11 @@ typedef struct send_slot{
 } send_slot;
 
 typedef struct window_t{
+  
+  pthread_mutex_t win_not_full;
+  pthread_cond_t win_full_wake;
 
   uint32_t adv_win_size;
-  uint32_t this_window_size;
 
   Seqno last_acked_recv;
   uint32_t last_byte_send;
@@ -60,7 +62,7 @@ typedef struct window_t{
  
 
   Seqno last_seq_read;
-  Seqno next_seq_expected; //下一个期望的序列号
+  Seqno next_seq_expected;
   recv_slot recv_header;
   
 
