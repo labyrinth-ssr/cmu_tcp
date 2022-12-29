@@ -13,7 +13,7 @@
  */
 
 #include "cmu_packet.h"
-
+#include "cmu_tcp.h"
 #include <arpa/inet.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -167,7 +167,7 @@ void read_header(cmu_tcp_header_t* header){
   seq_num: %u\t\t\t\t|\n|\
   ack_num: %u\t\t\t\t|\n|\
   hlen: %u |plen:%u |flags ack:%u,syn:%u,fin:%u\t|\n|\
-  advertised_window: %u |extension_length: %u\t|\n|\
+  advertised_window:%u |extension_length:%u\t|\n|\
   data: %s\n|\
 ------------------------------------------------\n\n", time_start.tv_nsec, header->identifier, get_src(header),  get_dst(header), get_seq(header), get_ack(header),
    get_hlen(header), get_plen(header), get_flags(header) & ACK_FLAG_MASK, get_flags(header) & SYN_FLAG_MASK, get_flags(header) & FIN_FLAG_MASK ,
@@ -188,9 +188,21 @@ void send_header(cmu_tcp_header_t* header){
   seq_num: %u\t\t\t\t|\n|\
   ack_num: %u\t\t\t\t|\n|\
   hlen: %u |plen:%u |flags ack:%u,syn:%u,fin:%u\t|\n|\
-  advertised_window: %u |extension_length: %u\t|\n|\
+  advertised_window:%u |extension_length:%u\t|\n|\
   data: %s\n|\
 ------------------------------------------------\n\n", time_start.tv_nsec, header->identifier, get_src(header),  get_dst(header), get_seq(header), get_ack(header),
    get_hlen(header), get_plen(header), get_flags(header) & ACK_FLAG_MASK, get_flags(header) & SYN_FLAG_MASK, get_flags(header) & FIN_FLAG_MASK ,
    get_advertised_window(header), get_extension_length(header), str);
+}
+
+void show_window(window_t* window){
+  printf("WINDOW-----------------------------------------\nsend:\n\
+  ack_recv: %u |byte_send: %u |ack_num: %u |send_length: %u \n\
+  RTT: %u | DevRTT: %u | RTO: %u \nreceive:\
+  seq_read: %u |seq_expected: %u \n\
+-----------------------------------------------\n", 
+  window->last_acked_recv, window->last_byte_send, window->ack_num, window->send_length,
+  window->RTT, window->DevRTT, window->RTO,
+  window->last_seq_read, window->next_seq_expected);
+  
 }

@@ -75,7 +75,7 @@ void insert_pkt_into_list(recv_slot *header, char *pkt){
     recv_slot *prev;
     recv_slot *slot = (recv_slot *)malloc(sizeof(recv_slot));
     int myseq = get_seq(pkt);
-    uint8_t* p = (uint8_t)malloc(get_plen(pkt));
+    uint8_t* p = (uint8_t*)malloc(get_plen(pkt));
     memcpy(p, pkt, get_plen(pkt));
     slot->msg = p;
     while(1){
@@ -179,6 +179,7 @@ void handle_message_sw(cmu_socket_t *sock, uint8_t *pkt) {
           window->ack_num = 0;
         }
       }
+      show_window(&sock->window);
       break;
     }
     // beginning of handshake in server. - wgy
@@ -189,12 +190,13 @@ void handle_message_sw(cmu_socket_t *sock, uint8_t *pkt) {
       window->adv_win_size = get_advertised_window(hdr);
       printf("recver told sender adv_win_size:%d\n", window->adv_win_size);
       handshake_send(sock, NULL, 0, (SYN_FLAG_MASK | ACK_FLAG_MASK));
+      show_window(&sock->window);
       break;
     }
 
     default: {
       uint32_t seq = get_seq(hdr);
-
+      show_window(&sock->window);
       if (seq == window->next_seq_expected) {
           
         uint32_t received_num = 0;
@@ -372,23 +374,27 @@ bool handle_handshake(cmu_socket_t *sock, uint8_t *data, int buf_len,
   bool this_flag = true;
   switch (flag) {
     case (SYN_FLAG_MASK | ACK_FLAG_MASK): {
-      printf("ack:%d,last_acked_recv:%d\n", get_ack(hdr), sock->window.last_acked_recv);
+      printf("ack:%d,last_acked_recv:%d,last_byte-send:%u\n", get_ack(hdr), sock->window.last_acked_recv,sock->window.last_byte_send+2);
       if (get_hlen(hdr) != get_plen(hdr)) {
         this_flag = false;
         break;
       }
-      if (get_ack(hdr) != sock->window.last_acked_recv) {
+      //show_window(&sock->window);
+      //exit(0);
+      if (get_ack(hdr) != sock->window.last_byte_send+1) {
         this_flag = false;
         break;
       }
       sock->window.last_acked_recv = get_ack(hdr);
       sock->window.last_seq_read = get_seq(hdr);
-      sock->window.next_seq_expected = get_seq(hdr) + get_payload_len(hdr) - 1;
+      sock->window.next_seq_expected = get_seq(hdr) + 1;
       sock->window.ack_num = 0;
       sock->window.adv_win_size = get_advertised_window(hdr);
       sock->window.RTT = WINDOW_INITIAL_RTT*1000;//初始化在握手过程中建立
       sock->window.DevRTT = 0;
       sock->window.RTO = sock->window.RTT;
+      printf("----------------------------------\n");
+      show_window(&sock->window);
       handshake_send(sock, data, buf_len, ACK_FLAG_MASK);
       break;
     }
@@ -397,7 +403,7 @@ bool handle_handshake(cmu_socket_t *sock, uint8_t *data, int buf_len,
     // should also handle it when in initiator.
     case ACK_FLAG_MASK: {
       if (sock->type == TCP_LISTENER &&
-          get_ack(hdr) != sock->window.last_acked_recv) {
+          get_ack(hdr) != sock->window.last_acked_recv+1) {
         this_flag = false;
         break;
       }
@@ -405,21 +411,27 @@ bool handle_handshake(cmu_socket_t *sock, uint8_t *data, int buf_len,
         set_flags(hdr, 0);
         sock->window.last_acked_recv = get_ack(hdr);
         sock->window.last_seq_read = get_seq(hdr);
-        sock->window.next_seq_expected = get_seq(hdr) + get_payload_len(hdr) - 1;  
+        //sock->window.next_seq_expected = get_seq(hdr) + get_payload_len(hdr) - 1;  
         sock->window.ack_num = 0;
         sock->window.adv_win_size = get_advertised_window(hdr);
         sock->window.RTT = WINDOW_INITIAL_RTT*1000;//初始化在握手过程中建立
         sock->window.DevRTT = 0;
         sock->window.RTO = sock->window.RTT;
       }
+      printf("==============================\n");
+      show_window(&sock->window);
       handle_message_sw(sock, pkt);
+
       break;
     }
     default:
       this_flag = false;
       break;
   }
+      printf("===========as===================\n");
+
   free(pkt);
+      printf("===========sa===================\n");
   return this_flag;
 }
 
@@ -482,7 +494,8 @@ void handshake_send(cmu_socket_t *sock, uint8_t *data, int b_len, int flag) {
 
   msg = create_packet(src, dst, seq, ack, hlen, plen, flags, adv_window,
                       ext_len, ext_data, payload, payload_len);
-  sock->window.last_byte_send = seq + payload_len - 1;
+  if(payload_len > 0) sock->window.last_byte_send = seq + payload_len - 1;
+  else sock->window.last_byte_send = seq;
   sock->window.send_length = payload_len;
   
   while (1) {
