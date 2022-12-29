@@ -123,6 +123,7 @@ void update_rtt(window_t* window, send_slot* slot) {
 
 
 void check_timeout(cmu_socket_t *sock){
+  printf("check timeout\n");
     window_t* window = &sock->window;
     send_slot* ss = &window->send_header;
     send_slot* next = NULL;
@@ -130,6 +131,8 @@ void check_timeout(cmu_socket_t *sock){
     while((next = ss->next)!=NULL){
       ss->next = next->next;
       if(get_time_gap(next) > rto){
+        printf("timeout resend\n");
+        send_header(next->msg);
         sendto(sock->socket, next->msg, get_plen(next->msg), 0, (struct sockaddr *)&(sock->conn), sizeof(sock->conn));
         gettimeofday(&next->timeout, NULL);
       }
@@ -198,7 +201,7 @@ void handle_message_sw(cmu_socket_t *sock, uint8_t *pkt) {
       uint32_t seq = get_seq(hdr);
       show_window(&sock->window);
       if (seq == window->next_seq_expected) {
-          
+        printf("accept data seq == window->next_seq_expected");
         uint32_t received_num = 0;
       
         window->last_seq_read = seq;
@@ -221,6 +224,7 @@ void handle_message_sw(cmu_socket_t *sock, uint8_t *pkt) {
           slot = prev->next;
         }
       }else{
+        printf("cache data seq != window->next_seq_expected");
         insert_pkt_into_list(&window->recv_header, pkt);
       }
 
@@ -341,7 +345,7 @@ void sw_send(cmu_socket_t *sock, uint8_t *data, int buf_len) {
     msg = create_packet(src, dst, seq, ack, hlen, plen, flags, adv_window, ext_len, ext_data, payload, send_len);
     sendto(sockfd, msg, get_plen(msg), 0, (struct sockaddr *)&(sock->conn), conn_len);
     send_header(msg);
-
+    show_window(window);
     window->last_byte_send += send_len;
     window->send_length += send_len;
 
@@ -381,11 +385,12 @@ bool handle_handshake(cmu_socket_t *sock, uint8_t *data, int buf_len,
       }
       //show_window(&sock->window);
       //exit(0);
-      if (get_ack(hdr) != sock->window.last_byte_send+1) {
+      if (get_ack(hdr) != sock->window.last_acked_recv+1) {
         this_flag = false;
         break;
       }
       sock->window.last_acked_recv = get_ack(hdr);
+      sock->window.last_byte_send = get_ack(hdr)-1;
       sock->window.last_seq_read = get_seq(hdr);
       sock->window.next_seq_expected = get_seq(hdr) + 1;
       sock->window.ack_num = 0;
@@ -393,7 +398,6 @@ bool handle_handshake(cmu_socket_t *sock, uint8_t *data, int buf_len,
       sock->window.RTT = WINDOW_INITIAL_RTT*1000;//初始化在握手过程中建立
       sock->window.DevRTT = 0;
       sock->window.RTO = sock->window.RTT;
-      printf("----------------------------------\n");
       show_window(&sock->window);
       handshake_send(sock, data, buf_len, ACK_FLAG_MASK);
       break;
@@ -410,6 +414,7 @@ bool handle_handshake(cmu_socket_t *sock, uint8_t *data, int buf_len,
       if (sock->type == TCP_LISTENER) {
         set_flags(hdr, 0);
         sock->window.last_acked_recv = get_ack(hdr);
+        sock->window.last_byte_send = get_ack(hdr)-1;
         sock->window.last_seq_read = get_seq(hdr);
         //sock->window.next_seq_expected = get_seq(hdr) + get_payload_len(hdr) - 1;  
         sock->window.ack_num = 0;
@@ -418,7 +423,6 @@ bool handle_handshake(cmu_socket_t *sock, uint8_t *data, int buf_len,
         sock->window.DevRTT = 0;
         sock->window.RTO = sock->window.RTT;
       }
-      printf("==============================\n");
       show_window(&sock->window);
       handle_message_sw(sock, pkt);
 
@@ -428,10 +432,7 @@ bool handle_handshake(cmu_socket_t *sock, uint8_t *data, int buf_len,
       this_flag = false;
       break;
   }
-      printf("===========as===================\n");
-
   free(pkt);
-      printf("===========sa===================\n");
   return this_flag;
 }
 
@@ -494,8 +495,7 @@ void handshake_send(cmu_socket_t *sock, uint8_t *data, int b_len, int flag) {
 
   msg = create_packet(src, dst, seq, ack, hlen, plen, flags, adv_window,
                       ext_len, ext_data, payload, payload_len);
-  if(payload_len > 0) sock->window.last_byte_send = seq + payload_len - 1;
-  else sock->window.last_byte_send = seq;
+  sock->window.last_byte_send = seq + payload_len - 1;
   sock->window.send_length = payload_len;
   
   while (1) {
