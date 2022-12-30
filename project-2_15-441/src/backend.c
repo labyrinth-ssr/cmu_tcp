@@ -189,7 +189,6 @@ void handle_message_sw(cmu_socket_t *sock, uint8_t *pkt) {
       sock->window.last_seq_read = get_seq(hdr);
       sock->window.next_seq_expected = get_seq(hdr) + 1;
       window->adv_win_size = get_advertised_window(hdr);
-      printf("recver told sender adv_win_size:%d\n", window->adv_win_size);
       handshake_send(sock, NULL, 0, (SYN_FLAG_MASK | ACK_FLAG_MASK));
       show_window(&sock->window);
       break;
@@ -199,7 +198,6 @@ void handle_message_sw(cmu_socket_t *sock, uint8_t *pkt) {
       uint32_t seq = get_seq(hdr);
       show_window(&sock->window);
       if (seq == window->next_seq_expected) {
-        printf("accept data seq == window->next_seq_expected");
         uint32_t received_num = 0;
       
         window->last_seq_read = seq;
@@ -210,7 +208,6 @@ void handle_message_sw(cmu_socket_t *sock, uint8_t *pkt) {
 
         recv_slot* slot = window->recv_header.next;
         recv_slot* prev = &window->recv_header;
-        //! we can't ensure the seq always increment because uint32 is limited, so maybe we should find a better method to resolve it later
         while(slot != NULL && (window->next_seq_expected == get_seq(slot->msg))){
           // Make sure there is enough space in the buffer to store the payload.
           deliver_data(sock, slot->msg);
@@ -222,7 +219,6 @@ void handle_message_sw(cmu_socket_t *sock, uint8_t *pkt) {
           slot = prev->next;
         }
       }else if(seq > window->next_seq_expected){
-        printf("cache data seq != window->next_seq_expected");
         insert_pkt_into_list(&window->recv_header, pkt);
       }else return;
 
@@ -327,8 +323,7 @@ void sw_send(cmu_socket_t *sock, uint8_t *data, int buf_len) {
   uint8_t flags = 0;
   int sockfd = sock->socket;
   uint32_t ack = sock->window.next_seq_expected;
-  while (buf_len != 0) {
-    printf("in sender:adv_win_size:%d, last_seq_sent:%d, last_acked_recv:%d\n", window->adv_win_size, window->last_acked_recv, window->last_acked_recv);
+  while (buf_len > 0) {
     seq = window->last_byte_send + 1;
 
     uint32_t send_len = MIN3(window->adv_win_size - window->send_length, MAX_LEN, buf_len);
@@ -341,12 +336,15 @@ void sw_send(cmu_socket_t *sock, uint8_t *data, int buf_len) {
   
     msg = create_packet(src, dst, seq, ack, hlen, plen, flags, adv_window, ext_len, ext_data, payload, send_len);
     sendto(sockfd, msg, get_plen(msg), 0, (struct sockaddr *)&(sock->conn), conn_len);
+    
     send_header(msg);
     show_window(window);
+
     window->last_byte_send += send_len;
     window->send_length += send_len;
 
     send_slot *slot = malloc(sizeof(send_slot));
+
     slot->msg = msg;
     gettimeofday(&slot->timeout, NULL);
 
@@ -357,12 +355,12 @@ void sw_send(cmu_socket_t *sock, uint8_t *data, int buf_len) {
     }
     ss->next = slot;
     slot->next = NULL;
-    
     data_offset += send_len;    
     seq += send_len;
 
-    check_for_data(sock, NO_WAIT);//!!!检查并更新window
+    check_for_data(sock, NO_WAIT);
   }
+  printf("out sw_send: buf_len: %d\n", buf_len);
 }
 
 
@@ -375,7 +373,6 @@ bool handle_handshake(cmu_socket_t *sock, uint8_t *data, int buf_len,
   bool this_flag = true;
   switch (flag) {
     case (SYN_FLAG_MASK | ACK_FLAG_MASK): {
-      printf("ack:%d,last_acked_recv:%d,last_byte-send:%u\n", get_ack(hdr), sock->window.last_acked_recv,sock->window.last_byte_send+2);
       if (get_hlen(hdr) != get_plen(hdr)) {
         this_flag = false;
         break;
@@ -403,8 +400,8 @@ bool handle_handshake(cmu_socket_t *sock, uint8_t *data, int buf_len,
     // data package. when server receive, they send an ack package, so the block
     // should also handle it when in initiator.
     case ACK_FLAG_MASK: {
-      if (sock->type == TCP_LISTENER &&
-          get_ack(hdr) != sock->window.last_acked_recv+1) {
+      if ((sock->type == TCP_LISTENER &&
+          get_ack(hdr) != sock->window.last_acked_recv+1)) {
         this_flag = false;
         break;
       }
@@ -437,7 +434,7 @@ bool handle_handshake(cmu_socket_t *sock, uint8_t *data, int buf_len,
  * if return value is not null, we should release pkt after using.
  * in handshake procedure, we use timeout check to vetify
  */
-uint8_t *wait_check(cmu_socket_t *sock) {
+uint8_t *wait_check(cmu_socket_t *sock, int flag) {
   cmu_tcp_header_t hdr;
   uint8_t *pkt;
   socklen_t conn_len = sizeof(sock->conn);
@@ -446,23 +443,29 @@ uint8_t *wait_check(cmu_socket_t *sock) {
   struct pollfd ack_fd;
   ack_fd.fd = sock->socket;
   ack_fd.events = POLLIN;
-  if (poll(&ack_fd, 1, 3000) <= 0) {
-    return NULL;
+  while(1){
+    if (poll(&ack_fd, 1, 3000) <= 0) {
+      return NULL;
+    }
+    len = recvfrom(sock->socket, &hdr, sizeof(cmu_tcp_header_t),
+                  MSG_DONTWAIT | MSG_PEEK, (struct sockaddr *)&(sock->conn),
+                  &conn_len);
+    if(get_payload_len(&hdr) == 0 && get_flags(&hdr) == ACK_FLAG_MASK && sock->type == TCP_LISTENER) {
+      len = recvfrom(sock->socket, &hdr, sizeof(cmu_tcp_header_t), 0, (struct sockaddr *)&(sock->conn),&conn_len);
+      continue;
+    }
+    else break;
   }
-  len = recvfrom(sock->socket, &hdr, sizeof(cmu_tcp_header_t),
-                 MSG_DONTWAIT | MSG_PEEK, (struct sockaddr *)&(sock->conn),
-                 &conn_len);
-
   if (len >= (ssize_t)sizeof(cmu_tcp_header_t)) {
     plen = get_plen(&hdr);
     pkt = malloc(plen);
     while (buf_size < plen) {
-      n = recvfrom(sock->socket, pkt + buf_size, plen - buf_size, 0,
-                   (struct sockaddr *)&(sock->conn), &conn_len);
+      n = recvfrom(sock->socket, pkt + buf_size, plen - buf_size, 0, (struct sockaddr *)&(sock->conn), &conn_len);
       buf_size = buf_size + n;
     }
     return pkt;
   }
+
   return NULL;
 }
 
@@ -499,11 +502,9 @@ void handshake_send(cmu_socket_t *sock, uint8_t *data, int b_len, int flag) {
     // for all three handshakes send and handle.
     send_header((cmu_tcp_header_t *)msg);
     sendto(sockfd, msg, plen, 0, (struct sockaddr *)&(sock->conn), conn_len);
-    if (handle_handshake(sock, data, b_len, wait_check(sock))) {
+    if (handle_handshake(sock, data, b_len, wait_check(sock, flag))) {
       break;
-    }else if(flag == (SYN_FLAG_MASK|ACK_FLAG_MASK)){
-      break;
-    }
+    } 
   }
   if (data_offset != NULL && (buf_len - payload_len) > 0)
     sw_send(sock, data_offset + payload_len, buf_len - payload_len);
@@ -512,7 +513,6 @@ void handshake_send(cmu_socket_t *sock, uint8_t *data, int b_len, int flag) {
 void *begin_backend(void *in) {
   printf("    in_func: begin_background\n");
   cmu_socket_t *sock = (cmu_socket_t *)in;
-  // int adv_win_size = MAX_RCV_BUFFER;
   int death, buf_len, send_signal;
   uint8_t *data = NULL;
 

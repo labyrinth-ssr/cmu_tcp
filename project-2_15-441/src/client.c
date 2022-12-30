@@ -22,7 +22,6 @@ void functionality(cmu_socket_t *sock) {
   uint8_t buf[9898];
   int read;
   FILE *fp;
-
   cmu_write(sock, "hi there", 8);
   cmu_write(sock, " https://www.youtube.com/watch?v=dQw4w9WgXcQ", 44);
   cmu_write(sock, " https://www.youtube.com/watch?v=Yb6dZ1IFlKc", 44);
@@ -49,6 +48,7 @@ void functionality(cmu_socket_t *sock) {
       cmu_write(sock, buf, read);
     }
   }
+
 }
 
 int main() {

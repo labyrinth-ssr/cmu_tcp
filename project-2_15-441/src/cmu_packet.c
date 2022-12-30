@@ -172,6 +172,7 @@ void read_header(cmu_tcp_header_t* header){
 ------------------------------------------------\n\n", time_start.tv_nsec, header->identifier, get_src(header),  get_dst(header), get_seq(header), get_ack(header),
    get_hlen(header), get_plen(header), get_flags(header) & ACK_FLAG_MASK, get_flags(header) & SYN_FLAG_MASK, get_flags(header) & FIN_FLAG_MASK ,
    get_advertised_window(header), get_extension_length(header),str);
+   free(str);
 }
 
 
@@ -193,6 +194,7 @@ void send_header(cmu_tcp_header_t* header){
 ------------------------------------------------\n\n", time_start.tv_nsec, header->identifier, get_src(header),  get_dst(header), get_seq(header), get_ack(header),
    get_hlen(header), get_plen(header), get_flags(header) & ACK_FLAG_MASK, get_flags(header) & SYN_FLAG_MASK, get_flags(header) & FIN_FLAG_MASK ,
    get_advertised_window(header), get_extension_length(header), str);
+  free(str);
 }
 
 void show_window(window_t* window){
