@@ -51,6 +51,9 @@ int cmu_socket(cmu_socket_t *sock, const cmu_socket_type_t socket_type,
   sock->dying = 0;
   pthread_mutex_init(&(sock->death_lock), NULL);
 
+  sock->window.send_header.next = NULL;
+  sock->window.recv_header.next = NULL;
+
   //done Sequence numbers should be randomly initialized. The next expected
   // sequence number should be initialized according to the SYN packet from the
   // other side of the connection.

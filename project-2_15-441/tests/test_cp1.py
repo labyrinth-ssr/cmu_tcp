@@ -109,11 +109,12 @@ def test_run_server_client():
     ):
         # here we seem to be wrong
         try:
+            client_conn.run(start_client_cmd)
+            client_conn.run("tmux has-session -t pytest_client")
+            
             server_conn.run(start_server_cmd)
             server_conn.run("tmux has-session -t pytest_server")
 
-            client_conn.run(start_client_cmd)
-            client_conn.run("tmux has-session -t pytest_client")
 
             # Exit when server finished receiving file.
             server_conn.run(
@@ -129,7 +130,6 @@ def test_run_server_client():
             print("stop client")
             client_conn.run(stop_client_cmd, hide=True)
         except Exception:
-            print("error2")
             # Ignore error here that may occur if client already shut down.
             pass
         try:
@@ -137,7 +137,6 @@ def test_run_server_client():
             print("stop server")
             server_conn.local(stop_server_cmd, hide=True)
         except Exception:
-            print("error3")
             # Ignore error here that may occur if server already shut down.
             pass
         if failed:

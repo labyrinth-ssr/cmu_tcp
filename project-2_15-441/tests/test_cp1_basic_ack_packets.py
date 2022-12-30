@@ -47,11 +47,7 @@ def test_basic_ack_packets():
                     udp /
                     CMUTCP(plen=25, seq_num=1000, flags=SYN_MASK)
                 )
-                print("IFNAME:"+IFNAME)
                 syn_ack_pkt = sr1(syn_pkt, timeout=TIMEOUT, iface=IFNAME)
-                if(syn_ack_pkt is None): print("err1")
-                if(syn_ack_pkt[CMUTCP].flags != SYN_MASK | ACK_MASK): print("err2"+" "+ syn_ack_pkt[CMUTCP].flags)
-                if(syn_ack_pkt[CMUTCP].ack_num != 1000 + 1): print("err3"+" "+syn_ack_pkt[CMUTCP].ack_num)
                 if (
                     syn_ack_pkt is None
                     or syn_ack_pkt[CMUTCP].flags != SYN_MASK | ACK_MASK

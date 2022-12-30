@@ -46,11 +46,9 @@ MAC_ADDRS = {"client": "02:42:0a:00:01:01", "server": "02:42:0a:00:01:01"}
 IP_ADDRS = {"client": "10.0.1.2", "server": "10.0.1.1"}
 HOST_IP = IP_ADDRS[HOSTNAME]
 HOST_MAC = MAC_ADDRS[HOSTNAME]
-# HOST_PORT = 1234
+HOST_PORT = 1234
 TESTING_HOST_IP = IP_ADDRS[TESTING_HOSTNAME]
 TESTING_HOST_MAC = MAC_ADDRS[TESTING_HOSTNAME]
-# TESTING_HOST_PORT = 15441
-HOST_PORT = 51777
 TESTING_HOST_PORT = 15441
 
 # We can use these commands to start/stop the testing server in a background

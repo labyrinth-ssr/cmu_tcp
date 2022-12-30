@@ -122,7 +122,6 @@ void update_rtt(window_t* window, send_slot* slot) {
 
 
 void check_timeout(cmu_socket_t *sock){
-  printf("check timeout\n");
     window_t* window = &sock->window;
     send_slot* ss = &window->send_header;
     send_slot* next = NULL;
@@ -222,10 +221,10 @@ void handle_message_sw(cmu_socket_t *sock, uint8_t *pkt) {
           free(slot);
           slot = prev->next;
         }
-      }else{
+      }else if(seq > window->next_seq_expected){
         printf("cache data seq != window->next_seq_expected");
         insert_pkt_into_list(&window->recv_header, pkt);
-      }
+      }else return;
 
 
       socklen_t conn_len = sizeof(sock->conn);
@@ -300,7 +299,6 @@ bool check_for_data(cmu_socket_t *sock, cmu_read_mode_t flags) {
     free(pkt);
   }
   pthread_mutex_unlock(&(sock->recv_lock));
-  sleep(1);
 
   return time_out;
 }
@@ -503,7 +501,7 @@ void handshake_send(cmu_socket_t *sock, uint8_t *data, int b_len, int flag) {
     sendto(sockfd, msg, plen, 0, (struct sockaddr *)&(sock->conn), conn_len);
     if (handle_handshake(sock, data, b_len, wait_check(sock))) {
       break;
-    }else if(flag == SYN_FLAG_MASK || flag == (SYN_FLAG_MASK|ACK_FLAG_MASK)){
+    }else if(flag == (SYN_FLAG_MASK|ACK_FLAG_MASK)){
       break;
     }
   }
