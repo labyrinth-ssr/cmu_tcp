@@ -120,7 +120,6 @@ void update_rtt(window_t* window, send_slot* slot) {
     window->RTO = (window->RTT) + (window->DevRTT) * 4;//更新RTO
 }
 
-
 void check_timeout(cmu_socket_t *sock){
     window_t* window = &sock->window;
     send_slot* ss = &window->send_header;
@@ -148,7 +147,6 @@ void check_timeout(cmu_socket_t *sock){
  * @param pkt The packet data received by the socket.
  */
 void handle_message_sw(cmu_socket_t *sock, uint8_t *pkt) {
-  printf("in_func: handle_message_sw\n");
   cmu_tcp_header_t *hdr = (cmu_tcp_header_t *)pkt;
   window_t *window = &sock->window;
   read_header(hdr);
@@ -229,7 +227,6 @@ void handle_message_sw(cmu_socket_t *sock, uint8_t *pkt) {
       uint16_t payload_len = 0;
       uint8_t flags = ACK_FLAG_MASK;
       uint16_t adv_window = WINDOW_INITIAL_WINDOW_SIZE - sock->received_len;
-      printf("rcver send adv_win_size:%d\n", adv_window);
       uint8_t *response_packet = create_packet(sock->my_port, ntohs(sock->conn.sin_port), window->last_acked_recv, window->next_seq_expected, 
                                   sizeof(cmu_tcp_header_t), sizeof(cmu_tcp_header_t) + payload_len, flags, adv_window, 
                                   0, NULL, payload, payload_len);
@@ -238,7 +235,6 @@ void handle_message_sw(cmu_socket_t *sock, uint8_t *pkt) {
       free(response_packet);
     }
   }
-  printf("    out_func: handle_message_sw\n");
 }
 
 /**
@@ -308,7 +304,6 @@ bool check_for_data(cmu_socket_t *sock, cmu_read_mode_t flags) {
  * @param buf_len The length of the data being sent.
  */
 void sw_send(cmu_socket_t *sock, uint8_t *data, int buf_len) {
-  printf("in sw_send: buf_len: %d\n", buf_len);
   uint8_t *msg;
   uint8_t *data_offset = data;
   size_t conn_len = sizeof(sock->conn);
@@ -360,12 +355,9 @@ void sw_send(cmu_socket_t *sock, uint8_t *data, int buf_len) {
 
     check_for_data(sock, NO_WAIT);
   }
-  printf("out sw_send: buf_len: %d\n", buf_len);
 }
 
-
-bool handle_handshake(cmu_socket_t *sock, uint8_t *data, int buf_len,
-                      uint8_t *pkt) {
+bool handle_handshake(cmu_socket_t *sock, uint8_t *data, int buf_len, uint8_t *pkt) {
   cmu_tcp_header_t *hdr = (cmu_tcp_header_t *)pkt;
   if (pkt == NULL) return false;
   read_header(hdr);
@@ -511,7 +503,6 @@ void handshake_send(cmu_socket_t *sock, uint8_t *data, int b_len, int flag) {
 }
 
 void *begin_backend(void *in) {
-  printf("    in_func: begin_background\n");
   cmu_socket_t *sock = (cmu_socket_t *)in;
   int death, buf_len, send_signal;
   uint8_t *data = NULL;
@@ -576,6 +567,5 @@ void *begin_backend(void *in) {
   }
 
   pthread_exit(NULL);
-  printf("    out_func: begin_background\n");
   return NULL;
 }
