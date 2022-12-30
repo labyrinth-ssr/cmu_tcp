@@ -35,7 +35,6 @@
 #define MIN(X, Y) (((X) < (Y)) ? (X) : (Y))
 #define MIN3(A,B,C) ((A)>(B)?(B):(A))>C?C:((A)>(B)?(B):(A))
 bool timer_on = false;
-#define RTT_RATE 0.5
 // int last_advertised_window=MAX_RCV_BUFFER;
 
 /**
